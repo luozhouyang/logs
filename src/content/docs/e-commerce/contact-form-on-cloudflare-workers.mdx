@@ -1,0 +1,223 @@
+---
+title: Building a Contact Inquiry System on Cloudflare Workers
+description: Design a customer contact form with rate limiting, email notifications, and admin management — running entirely on Cloudflare Workers and D1.
+sidebar:
+  order: 0
+---
+
+Every online store needs a "Contact Us" page. Customers have questions before buying — about sizing, shipping times, return policies. If they can't reach you, they don't buy.
+
+But a contact form is also an attack surface. Without protection, it becomes a spam relay, a DDoS vector, or a database-filling bot target. And on Cloudflare Workers, you can't rely on traditional server-side protections like session-based CSRF tokens or IP-based middleware chains.
+
+This post walks through designing a contact inquiry system that's simple enough for an indie store but robust enough to handle abuse — all running on Workers with D1.
+
+## Why Not Just a mailto: Link?
+
+The simplest "contact us" is a `mailto:` link. It requires zero backend code. So why build a whole system?
+
+1. **No record.** When a customer emails you directly, there's no database record. You can't search, filter, or track response times.
+2. **No admin workflow.** Did someone on the team already reply? Is this inquiry resolved? With email, you're guessing.
+3. **Spam filtering is your problem.** A public email address gets scraped by bots within weeks.
+4. **No rate limiting.** Anyone can flood your inbox.
+
+A form-backed system gives you: structured data, admin visibility, rate limiting, and the ability to notify the store owner instantly via email while keeping a permanent record in D1.
+
+## The Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     Storefront                                 │
+│                                                               │
+│  ┌─────────┐     ┌────────────────────────────────────────┐  │
+│  │   FAB   │────▶│  Dialog: Name / Email / Message        │  │
+│  │ (fixed) │     │  [Send Message]                         │  │
+│  └─────────┘     └───────────────────┬────────────────────┘  │
+└──────────────────────────────────────┼────────────────────────┘
+                                       │ POST submitContactInquiry
+                                       ▼
+┌──────────────────────────────────────────────────────────────┐
+│                     Server Function                            │
+│                                                               │
+│  1. Rate limit check (CF Rate Limiting binding)               │
+│  2. Zod validation (name ≤100, email valid, message ≤2000)   │
+│  3. INSERT into contact_inquiries                             │
+│  4. Send email notification to store owner (fire-and-forget)  │
+│  5. Return { success: true }                                  │
+└──────────────────────────────────────────────────────────────┘
+                                       │
+                    ┌──────────────────┼──────────────────┐
+                    ▼                                     ▼
+┌────────────────────────────────┐     ┌────────────────────────────┐
+│         D1 (contact_inquiries) │     │   SMTP (store owner email)  │
+│                                │     │                             │
+│  id, name, email, message,     │     │  "New inquiry from Alice"   │
+│  source_url, ip_address,       │     │  Name: Alice                │
+│  is_read, created_at           │     │  Email: alice@example.com   │
+│                                │     │  Message: Do you ship to... │
+└────────────────────────────────┘     └────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────┐
+│                     Admin Panel                                │
+│                                                               │
+│  /admin/inquiries          → list (search, pagination)        │
+│  /admin/inquiries/$id      → detail (mark read, delete)       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Rate Limiting: The First Line of Defense
+
+Why is rate limiting the first thing we think about? Because a contact form without it is an open relay. A bot can submit thousands of entries per minute, filling your database and flooding your email.
+
+Cloudflare Workers has a native Rate Limiting binding — no Redis, no external service:
+
+```jsonc
+// wrangler.jsonc
+{
+  "binding": "CONTACT_RATE_LIMITER",
+  "type": "ratelimit",
+  "namespace_id": 1003,
+  "simple": { "limit": 5, "period": 600 }
+}
+```
+
+Five requests per 10 minutes per IP. Generous for a real customer (who submits once), restrictive for a bot.
+
+```typescript
+const { success } = await env.CONTACT_RATE_LIMITER.limit({
+  key: `contact:${ip}`,
+});
+
+if (!success) {
+  throw new Error("Something went wrong. Please try again later.");
+}
+```
+
+Notice the error message: generic. We don't say "rate limit exceeded." We don't reveal that there IS a rate limit. An attacker who knows the limit can pace their requests to stay under it. A generic error gives them nothing.
+
+The IP comes from `CF-Connecting-IP` — a header Cloudflare sets with the true client IP, even behind proxies.
+
+## Input Validation: Strict and Boring
+
+```typescript
+const schema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email().max(254),
+  message: z.string().min(1).max(2000),
+  sourceUrl: z.string().url().max(500).optional(),
+});
+```
+
+Why these specific limits?
+
+- **name ≤ 100.** No legitimate name is longer than this. Prevents oversized payloads.
+- **email ≤ 254.** The RFC 5321 maximum. Anything longer is invalid by spec.
+- **message ≤ 2000.** Enough for a detailed question. Not enough to store a novel (or a payload).
+- **sourceUrl optional.** Useful for knowing which page the customer was on. But optional — not every submission comes from a trackable context.
+
+The Zod schema runs in the server function's `.validator()` — before the handler executes. Invalid input never touches the database.
+
+## The Database Table
+
+```sql
+CREATE TABLE contact_inquiries (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  message TEXT NOT NULL,
+  source_url TEXT,
+  ip_address TEXT,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Why store `ip_address`? For abuse investigation. If you see 50 inquiries from the same IP with slightly different messages, that's a bot. The IP lets you block at the Cloudflare dashboard level.
+
+Why `source_url`? Context. "Do you ship to Canada?" means something different on a product page vs. the homepage. Knowing where the customer was helps you answer better.
+
+Why `is_read` instead of a status enum? Because inquiries have exactly two states: unseen and seen. There's no "in progress" or "resolved" — you reply via email, and the inquiry's job is done. A boolean is the simplest thing that works.
+
+## Email Notification: Fire and Forget
+
+When an inquiry arrives, the store owner should know immediately. But email delivery must never block the user-facing response.
+
+```typescript
+// After successful DB insert:
+try {
+  const html = render(<ContactInquiryEmail {...props} />);
+  await sendEmail(db, {
+    eventType: "contact_inquiry",
+    toEmail: config.fromEmail,  // store owner
+    subject: `New inquiry from ${name}`,
+    html,
+  });
+} catch {
+  // Logged internally. User still sees success.
+}
+```
+
+Why fire-and-forget? Because the customer's submission succeeded the moment the database write completed. The email notification is a convenience for the store owner. If SMTP is down, the inquiry is still in the database. The store owner will see it when they check the admin panel.
+
+The existing email retry cron (from our transactional email system) will pick up failed notification emails and retry them. So "fire and forget" isn't really "forget" — it's "eventually deliver."
+
+## The Frontend: FAB + Dialog
+
+Why a floating action button instead of a dedicated /contact page?
+
+1. **Visibility.** A FAB is always in the viewport. A nav link requires the customer to look for it.
+2. **Context preservation.** The dialog opens over the current page. The customer doesn't lose their place.
+3. **Mobile-friendly.** A bottom-right FAB is thumb-reachable. A nav link requires scrolling to the top.
+
+The dialog follows a simple state machine:
+
+```
+idle → submitting → success
+                  → error (preserve inputs, show message)
+```
+
+On success, the form is replaced with a confirmation message. No redirect, no page reload. The customer stays where they were.
+
+If the customer is logged in, we pre-fill name and email from their session. One less friction point.
+
+## Admin Management
+
+The admin panel is deliberately simple:
+
+**List page** (`/admin/inquiries`):
+- Table with Name, Email, Message (truncated), Status, Date
+- Search across name/email/message (SQLite LIKE, case-insensitive for ASCII)
+- Cursor-based pagination (20 per page)
+- Unread rows highlighted with a subtle background color
+- Actions: toggle read/unread, delete (with confirmation)
+
+**Detail page** (`/admin/inquiries/$id`):
+- Full message, source URL, IP address, timestamp
+- "Mark unread" button (for re-queuing)
+- "Delete" button (with confirmation, redirects to list)
+- Viewing the detail page automatically marks the inquiry as read
+
+Why auto-mark-read on view? Because the admin's intent in opening the detail is to read it. Requiring a separate "mark as read" click is unnecessary friction.
+
+Why cursor pagination instead of offset? Because inquiries are append-only. Offset pagination breaks when new rows are inserted (items shift between pages). Cursor pagination (WHERE id < :cursor ORDER BY id DESC) is stable regardless of inserts.
+
+## What We Deliberately Excluded
+
+- **No CAPTCHA/Turnstile.** At indie scale, rate limiting is sufficient. CAPTCHA adds friction for real customers and is defeated by CAPTCHA-solving services anyway.
+- **No honeypot field.** Same reasoning. Rate limiting is the real defense.
+- **No file attachments.** Adds storage complexity, virus scanning requirements, and abuse vectors. If a customer needs to send a photo, they can include a link.
+- **No admin reply-to-customer.** The admin replies via their regular email client. Building a reply system turns this into a helpdesk — that's a different product.
+- **No CSRF token.** Server functions are same-origin POST with Zod validation. The browser's same-origin policy is the CSRF protection.
+
+## Security Summary
+
+| Threat | Mitigation |
+| --- | --- |
+| Spam flooding | CF Rate Limiting (5/10min per IP) |
+| Oversized payloads | Zod max lengths (100/254/2000) |
+| SQL injection | Drizzle ORM parameterized queries |
+| XSS in admin panel | React auto-escaping |
+| Information leakage | Generic error messages |
+| Database abuse | Strict input validation + rate limit |
+
+The system is 1 database table, 1 public server function, 4 admin server functions, 1 email template, and 2 React components. Simple enough to maintain, robust enough to trust.

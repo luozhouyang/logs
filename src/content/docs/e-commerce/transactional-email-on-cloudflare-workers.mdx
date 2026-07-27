@@ -1,0 +1,311 @@
+---
+title: Transactional Email on Cloudflare Workers with SMTP and React Email
+description: Build a reliable transactional email system on Cloudflare Workers using worker-mailer, React Email templates, D1-backed retry, and HMAC-signed order links.
+tags: [cloudflare, workers, email, smtp, react-email]
+sidebar:
+  order: 0
+---
+
+When a customer places an order on your indie store, they expect a confirmation email within seconds. When it ships, they want tracking info. When something goes wrong, they need to know immediately. Transactional email is not optional — it's the backbone of customer trust.
+
+But here's the challenge: if your entire backend runs on Cloudflare Workers, you can't just `npm install nodemailer` and call it a day. Workers don't have raw TCP sockets by default, there's no persistent process to run a mail queue, and a failed SMTP connection shouldn't block your webhook handler.
+
+This post walks through how we built a production email notification system that runs entirely on Cloudflare Workers — with reliable delivery, automatic retry, beautiful templates, and secure order tracking links.
+
+## Why This Is Hard on Workers
+
+Let's think about what a traditional server gives you for free:
+
+1. **Persistent connections.** A long-lived Node.js process can maintain an SMTP connection pool.
+2. **Background jobs.** A failed email can be retried by a queue worker (BullMQ, Inngest, etc.).
+3. **File system.** Templates can be read from disk, logs written to files.
+
+Workers give you none of these. Each request is an isolated execution context. There's no "next tick" to retry in. There's no process to hold a connection open.
+
+So we need to rethink the architecture around three constraints:
+
+- **SMTP over TCP sockets** — possible with `nodejs_compat` flag and `cloudflare:sockets`, but each connection is per-request
+- **Retry must be external** — a cron trigger or scheduled endpoint
+- **State must live in D1** — the database is our queue
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Business Events                                │
+│                                                                  │
+│  order_confirmed    order_shipped    order_delivered    order_failed │
+└────────┬────────────────┬────────────────┬────────────────┬──────┘
+         │                │                │                │
+         ▼                ▼                ▼                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     events.ts                                     │
+│                                                                  │
+│  1. Load order context from D1 (order, items, user email)        │
+│  2. Generate HMAC-signed order URL                               │
+│  3. Render React Email template to HTML string                   │
+│  4. Call sendEmail()                                             │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     sender.ts                                     │
+│                                                                  │
+│  1. INSERT email_logs row (status=pending)                       │
+│  2. Attempt SMTP send via worker-mailer (5s timeout)             │
+│  3a. Success → UPDATE status=sent                                │
+│  3b. Failure → UPDATE status=failed, last_error                  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     retry.ts (cron, every 15 min)                 │
+│                                                                  │
+│  SELECT * FROM email_logs                                        │
+│  WHERE status='failed' AND attempts < 3                          │
+│  → re-send each, update status                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The key insight: **the database IS the queue**. We don't need Redis, RabbitMQ, or any external queue service. D1 gives us durable state, and a cron trigger gives us periodic execution.
+
+## Why worker-mailer?
+
+Cloudflare Workers gained TCP socket support via the `nodejs_compat` compatibility flag. The `worker-mailer` library wraps this into a clean SMTP client:
+
+```typescript
+import { WorkerMailer } from "worker-mailer";
+
+const mailer = await WorkerMailer.connect({
+  host: config.host,
+  port: 465,
+  secure: true,
+  credentials: { username, password },
+  authType: "login",
+  socketTimeoutMs: 5000,
+  responseTimeoutMs: 5000,
+});
+
+await mailer.send({
+  from: { name: "RealParkly", email: "orders@realparkly.com" },
+  to: "customer@example.com",
+  subject: "Order Confirmed",
+  html: "<h1>Thank you!</h1>",
+});
+```
+
+Why not use an HTTP-based email API (Resend, SendGrid, Mailgun)? Three reasons:
+
+1. **Cost.** SMTP is free if you already have a mailbox. API services charge per email.
+2. **Simplicity.** One dependency, no API key management, no vendor lock-in.
+3. **Control.** You own the SMTP server configuration, DKIM, SPF, DMARC.
+
+The tradeoff: SMTP connections are slower (~200-500ms) and less reliable than HTTP APIs. That's exactly why we built the retry system.
+
+## The Send-with-Logging Pattern
+
+The most important design decision: **never send an email without first recording the intent**.
+
+```typescript
+async function sendEmail(db: Database, params: SendEmailParams): Promise<void> {
+  const [log] = await db
+    .insert(emailLogs)
+    .values({
+      eventType: params.eventType,
+      orderId: params.orderId ?? null,
+      toEmail: params.toEmail,
+      subject: params.subject,
+      html: params.html,
+      status: "pending",
+      attempts: 0,
+    })
+    .returning();
+
+  try {
+    const mailer = await createMailer();
+    await mailer.send({ /* ... */ });
+    await db.update(emailLogs)
+      .set({ status: "sent", attempts: 1 })
+      .where(eq(emailLogs.id, log.id));
+  } catch (error) {
+    await db.update(emailLogs)
+      .set({ status: "failed", attempts: 1, lastError: msg.slice(0, 512) })
+      .where(eq(emailLogs.id, log.id));
+  }
+}
+```
+
+Why this order matters:
+
+- If the Worker is killed mid-send (CPU time exceeded, DDoS protection), the `pending` row tells us an email was attempted but we don't know if it arrived.
+- If SMTP fails, the `failed` row with `lastError` gives us observability.
+- The `html` column stores the rendered email — retry doesn't need to re-render templates or re-query order data.
+
+This is the **outbox pattern** adapted for serverless: write intent first, execute second, reconcile later.
+
+## Retry: The Cron-Driven Approach
+
+In a traditional system, you'd use a job queue with exponential backoff. On Workers, we use a cron trigger that calls an authenticated endpoint:
+
+```typescript
+export async function retryFailedEmails(db: Database) {
+  const pending = await db
+    .select()
+    .from(emailLogs)
+    .where(and(
+      eq(emailLogs.status, "failed"),
+      lt(emailLogs.attempts, 3)  // max 3 attempts
+    ))
+    .limit(20);  // batch size to stay within CPU limits
+
+  for (const log of pending) {
+    try {
+      const mailer = await createMailer();
+      await mailer.send({ /* from stored html */ });
+      await db.update(emailLogs)
+        .set({ status: "sent", attempts: log.attempts + 1 })
+        .where(eq(emailLogs.id, log.id));
+    } catch (error) {
+      await db.update(emailLogs)
+        .set({ attempts: log.attempts + 1, lastError: msg })
+        .where(eq(emailLogs.id, log.id));
+    }
+  }
+}
+```
+
+Design decisions worth noting:
+
+- **Max 3 attempts.** After that, the email is permanently failed. An alert should fire (we log it; a monitoring system picks it up).
+- **Batch limit of 20.** Workers have CPU time limits. Processing 20 emails with 5s timeouts each is already aggressive.
+- **Stored HTML.** We don't re-render. The order state may have changed since the original event. The email should reflect the moment it was triggered.
+- **No exponential backoff.** With a 15-minute cron interval, attempts happen at t+15min, t+30min, t+45min. Good enough for transactional email.
+
+## React Email Templates
+
+Why React Email instead of plain HTML strings?
+
+1. **Component reuse.** A shared `EmailLayout` handles branding, fonts, footer across all templates.
+2. **Type safety.** Props are typed — you can't forget to pass `orderId`.
+3. **Local development.** `@react-email/render` converts components to HTML strings at runtime, no build step needed.
+
+```tsx
+export function OrderConfirmedEmail(props: OrderConfirmedProps) {
+  return (
+    <EmailLayout>
+      <Heading>Order Confirmed</Heading>
+      <Text>
+        Thank you! Order <strong>{props.orderId.slice(0, 12)}</strong> is confirmed.
+      </Text>
+      {props.items.map((item, i) => (
+        <Section key={i}>
+          <Text>{item.title} × {item.quantity}</Text>
+          <Text>{fmt(item.unitPriceCents * item.quantity, props.currency)}</Text>
+        </Section>
+      ))}
+      <a href={props.orderUrl}>View Your Order</a>
+    </EmailLayout>
+  );
+}
+```
+
+Rendering happens in `events.ts`:
+
+```typescript
+const html = await render(OrderConfirmedEmail({ orderId, items, ... }));
+await sendEmail(db, { eventType: "order_confirmed", orderId, toEmail, subject, html });
+```
+
+## Secure Order Links with HMAC
+
+The confirmation email contains a "View Your Order" link. But we don't want to require login (guests checkout without accounts). The solution: HMAC-signed tokens.
+
+```typescript
+export async function signOrderToken(orderId: string, email: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.ORDER_LINK_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${orderId}|${email}`));
+  return base64UrlEncode(sig);
+}
+```
+
+The order page URL looks like: `/order/ord_abc123?t=<hmac_token>`
+
+Verification on the server:
+
+```typescript
+const authorized = await verifyOrderToken(orderId, userEmail, token);
+```
+
+Why HMAC instead of JWT?
+
+- **Simpler.** No payload, no expiry claims, no library needed. Just sign and compare.
+- **Stateless.** The token is deterministic — same inputs always produce the same token. No need to store tokens in the database.
+- **Sufficient.** We're not building a session system. We just need to prove "this person received the email for this order."
+
+The token never expires (it's tied to orderId + email). If you need expiry, add a timestamp to the signed message. For order tracking, permanent access is fine.
+
+## Integration Points
+
+Email sends are triggered from three places:
+
+| Event | Trigger Location | Template |
+| --- | --- | --- |
+| Order confirmed | Stripe/PayPal webhook handler | `OrderConfirmedEmail` |
+| Order shipped | Fulfillment success (SP-API) | `OrderShippedEmail` |
+| Order delivered | Shipment sync cron | `OrderDeliveredEmail` |
+| Order failed | Fulfillment error | `OrderFailedEmail` |
+
+Critical rule: **email sends never throw out of the caller**. Every `sendOrder*` function wraps its body in try/catch. A failed email must never prevent order creation or fulfillment.
+
+```typescript
+export async function sendOrderConfirmed(db, orderId, origin) {
+  try {
+    const ctx = await getOrderContext(db, orderId);
+    if (!ctx) return;
+    const html = await render(OrderConfirmedEmail({ ... }));
+    await sendEmail(db, { ... });
+  } catch (error) {
+    logger.error("email.order_confirmed_failed", { orderId, error: String(error) });
+  }
+}
+```
+
+## The Email Logs Schema
+
+```sql
+CREATE TABLE email_logs (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  order_id TEXT,
+  to_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  html TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at INTEGER DEFAULT (unixepoch()),
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+This table serves triple duty:
+
+1. **Queue.** `status=failed AND attempts < 3` rows are the retry queue.
+2. **Audit log.** Every email ever sent is recorded with timestamp.
+3. **Debugging.** `last_error` tells you exactly why a send failed.
+
+## Lessons Learned
+
+1. **Timeouts are non-negotiable.** Without `socketTimeoutMs: 5000`, a hung SMTP connection will burn your entire CPU budget. One slow email shouldn't take down your webhook handler.
+
+2. **Store the rendered HTML.** Re-rendering on retry means re-querying the database, and the data may have changed. The email is a snapshot of a moment.
+
+3. **Cron is good enough.** You don't need a real queue for transactional email at indie-store scale. 15-minute retry intervals are fine — customers don't notice if their shipping confirmation arrives 15 minutes late.
+
+4. **Separate concerns ruthlessly.** `events.ts` knows about orders. `sender.ts` knows about SMTP. `retry.ts` knows about the queue. Templates know about presentation. Each file has one job.

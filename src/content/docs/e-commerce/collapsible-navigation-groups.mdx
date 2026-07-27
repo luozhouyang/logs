@@ -1,0 +1,252 @@
+---
+title: Organizing Admin Navigation with Collapsible Groups
+description: How to restructure a flat admin sidebar into collapsible navigation groups with localStorage persistence and route-aware auto-expansion.
+sidebar:
+  order: 0
+---
+
+An admin panel starts small. Five nav items, all visible, no problem. Then you add discount codes, contact inquiries, payment settings, sync logs. Suddenly there are twelve flat items in the sidebar, and finding "Settings" means scrolling past things you never touch.
+
+This is a UI problem, not a features problem. The features are fine. The navigation just hasn't grown up with them.
+
+The fix isn't a hamburger menu or a command palette — those hide information. The fix is **grouping**: related items collapse into labeled sections, and the section you're working in stays open.
+
+## Why Flat Navigation Breaks
+
+Twelve items in a vertical list creates three problems:
+
+1. **Scan time.** The eye has to read every label to find the right one. With groups, you scan 4 group headers first, then 2-3 items within.
+2. **Visual weight.** Twelve items make the sidebar feel dense. Most of them are irrelevant to your current task.
+3. **No hierarchy signal.** "Products" and "Sync Logs" look equally important. They're not. One is a daily tool; the other is a debugging aid.
+
+Groups solve all three: they reduce visible items, they declutter, and they communicate importance through structure.
+
+## The Group Structure
+
+Before writing code, decide the grouping. This is an information architecture decision, not a UI decision:
+
+```
+Dashboard        (standalone — always visible)
+Orders           (standalone — always visible)
+─ Catalog ─      (group)
+   Products / Categories / Media
+─ Storefront ─   (group)
+   Collections / Occasions / Prices / Discounts
+─ Customers ─    (group)
+   Users
+─ System ─       (group)
+   Sync Logs / Settings
+View Store       (bottom link, unchanged)
+```
+
+Why are Dashboard and Orders standalone (not in a group)?
+
+- **Dashboard** is the landing page. It should never be hidden inside a collapsed group.
+- **Orders** is the most frequently accessed item. Forcing a click to expand "Operations" before reaching Orders adds friction to the most common action.
+
+Why "Catalog" and "Storefront" are separate groups instead of one "Products" group?
+
+- Catalog is about *what you sell* (products, categories, images).
+- Storefront is about *how you sell it* (collections, pricing, promotions).
+- A product manager works in Catalog. A marketing person works in Storefront. Different mental models.
+
+Why "Customers" has only one item (Users)?
+
+- It's a slot for the future: user tags, mass email, customer segments. The group exists now so adding items later doesn't require restructuring.
+
+## Behavior Specification
+
+The interaction model has four rules:
+
+1. **Group headers are buttons.** Clicking toggles expand/collapse. They have `aria-expanded` for accessibility.
+2. **On page load: auto-expand the current route's group.** If you're on `/admin/discounts`, the "Storefront" group is open. All others are collapsed.
+3. **User toggles persist to localStorage.** If an admin manually opens "Catalog" and closes "Storefront," that preference survives page navigation.
+4. **The current route's group is ALWAYS expanded.** Even if the user previously collapsed it. You can't navigate to a page whose nav item is hidden.
+
+Rule 4 overrides rule 3. This is deliberate. If you're on `/admin/products` and the Catalog group is collapsed, you can't see where you are. That's disorienting. The current location must always be visible.
+
+## Implementation: Data Structure
+
+The nav data changes from a flat array to a mixed structure:
+
+```typescript
+type NavItem = {
+  to: string;
+  label: string;
+  icon: string;
+};
+
+type NavGroup = {
+  id: string;
+  label: string;
+  items: NavItem[];
+};
+
+type NavEntry = NavItem | NavGroup;
+
+const NAV: NavEntry[] = [
+  { to: "/admin", label: "Dashboard", icon: "dashboard" },
+  { to: "/admin/orders", label: "Orders", icon: "shopping_cart" },
+  {
+    id: "catalog",
+    label: "Catalog",
+    items: [
+      { to: "/admin/products", label: "Products", icon: "inventory_2" },
+      { to: "/admin/categories", label: "Categories", icon: "category" },
+      { to: "/admin/media", label: "Media", icon: "photo_library" },
+    ],
+  },
+  {
+    id: "storefront",
+    label: "Storefront",
+    items: [
+      { to: "/admin/collections", label: "Collections", icon: "collections" },
+      { to: "/admin/occasions", label: "Occasions", icon: "celebration" },
+      { to: "/admin/prices", label: "Prices", icon: "payments" },
+      { to: "/admin/discounts", label: "Discounts", icon: "local_offer" },
+    ],
+  },
+  {
+    id: "customers",
+    label: "Customers",
+    items: [
+      { to: "/admin/users", label: "Users", icon: "group" },
+    ],
+  },
+  {
+    id: "system",
+    label: "System",
+    items: [
+      { to: "/admin/sync-logs", label: "Sync Logs", icon: "sync" },
+      { to: "/admin/settings", label: "Settings", icon: "settings" },
+    ],
+  },
+];
+```
+
+A type guard distinguishes them at render time:
+
+```typescript
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return "items" in entry;
+}
+```
+
+## Implementation: Expansion State
+
+The expansion state is a `Record<string, boolean>` — group id to expanded/collapsed:
+
+```typescript
+const STORAGE_KEY = "admin-nav-groups";
+
+function loadState(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveState(state: Record<string, boolean>) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+```
+
+On mount, compute the effective state:
+
+```typescript
+function getEffectiveState(
+  stored: Record<string, boolean>,
+  currentPath: string,
+): Record<string, boolean> {
+  const state = { ...stored };
+
+  for (const entry of NAV) {
+    if (!isGroup(entry)) continue;
+
+    const containsCurrent = entry.items.some(
+      (item) => currentPath === item.to || currentPath.startsWith(item.to + "/"),
+    );
+
+    if (containsCurrent) {
+      state[entry.id] = true;  // force-expand (rule 4)
+    } else if (!(entry.id in state)) {
+      state[entry.id] = false; // default: collapsed
+    }
+  }
+
+  return state;
+}
+```
+
+The `startsWith(item.to + "/")` check handles nested routes like `/admin/products/prod_123` — the "Catalog" group should still be expanded.
+
+## Implementation: Animation
+
+Collapsible sections need smooth animation. The CSS grid-rows trick avoids JavaScript height measurement:
+
+```css
+.nav-group-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease;
+}
+
+.nav-group-content[data-expanded="true"] {
+  grid-template-rows: 1fr;
+}
+
+.nav-group-content > * {
+  overflow: hidden;
+}
+```
+
+Why `grid-template-rows: 0fr → 1fr` instead of `max-height`?
+
+- `max-height` requires guessing a value. Too small and content clips. Too large and the animation timing feels wrong (it animates through invisible space).
+- `grid-template-rows` animates to the actual content height. No guessing, no clipping, correct timing.
+
+## Visual Details
+
+- **Group headers** use a smaller font size and muted color. They're labels, not navigation targets.
+- **Active group header** (contains the current route) uses primary color. A subtle hint that "you're in this section."
+- **Child items** are indented to align with the parent icon's right edge. This creates a visual tree without explicit tree lines.
+- **Expand icon** rotates: `expand_more` when collapsed, `expand_less` when expanded. The rotation animates via CSS transform.
+
+```tsx
+<button
+  onClick={() => toggleGroup(group.id)}
+  aria-expanded={expanded}
+  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground"
+>
+  <span className="material-symbols-outlined text-[18px]">
+    {expanded ? "expand_less" : "expand_more"}
+  </span>
+  <span className={containsActive ? "text-primary font-medium" : ""}>
+    {group.label}
+  </span>
+</button>
+```
+
+## Accessibility
+
+- Group headers are `<button>` elements (not `<div>` with onClick). Keyboard users can Tab to them and press Enter/Space.
+- `aria-expanded` communicates state to screen readers.
+- Child items are standard `<a>` elements. No ARIA roles needed — they're just links.
+- The collapsed content is hidden via `overflow: hidden` + `grid-template-rows: 0fr`. Screen readers skip it because it has zero height. For stricter hiding, add `visibility: hidden` with a transition delay.
+
+## What This Isn't
+
+- **Not a tree view.** There are no nested sub-groups. Two levels (group → item) is enough for 12 items.
+- **Not responsive.** The admin sidebar is `hidden md:flex` — it doesn't render on mobile. Admin work happens on desktop.
+- **Not a command palette.** Cmd+K search is a separate feature. Groups are for spatial navigation; search is for recall navigation. They complement each other.
+
+## The Result
+
+Before: 12 items, all visible, no structure.
+After: 2 standalone items + 4 groups (10 items inside), 3 groups collapsed by default.
+
+The sidebar shows 6 lines instead of 12. The admin sees what's relevant to their current task. Adding new items (user tags, mass email) slots into an existing group without restructuring.
+
+Sometimes the best feature is organizing the features you already have.

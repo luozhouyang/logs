@@ -1,0 +1,403 @@
+---
+title: Building a Payment Gateway on Cloudflare Workers for Indie E-Commerce
+description: Design a switchable Stripe + PayPal payment gateway abstraction on Cloudflare Workers with D1, encrypted credentials, and unified checkout sessions.
+tags: [payment, stripe, paypal, cloudflare, workers, e-commerce]
+sidebar:
+  order: 0
+---
+
+Running an independent e-commerce site (独立站) means you own the entire stack — from product pages to checkout to fulfillment. One of the most critical pieces is the payment gateway. You need to support multiple providers (Stripe, PayPal), switch between them without downtime, store credentials securely, and never lose an order.
+
+This post walks through the architecture of a production payment gateway system running entirely on **Cloudflare Workers**, with D1 (SQLite at the edge) as the database, Web Crypto API for credential encryption, and TanStack Start as the full-stack framework. No traditional server needed — the entire checkout flow, webhook handling, and admin management runs in Workers.
+
+## The Problem with Naive Integration
+
+Most indie stores start with a direct Stripe integration. It works — until you need PayPal. The naive approach leads to:
+
+- Duplicated checkout logic across providers
+- Business context (cart, user, discounts) stuffed into gateway metadata
+- PayPal's `custom_id` losing data (stringly-typed, size-limited, unreliable on webhook fallback)
+- No way to switch providers without a deploy
+
+The fix: a **gateway abstraction layer** with a local checkout session as the single source of truth.
+
+## Architecture Overview
+
+```
+src/lib/payments/
+  types.ts            # PaymentGateway interface + shared types
+  factory.ts          # Returns active gateway instance from DB settings
+  encryption.ts       # AES-256-GCM via Web Crypto API
+  stripe-gateway.ts   # Stripe implementation
+  paypal-gateway.ts   # PayPal implementation
+  order-creation.ts   # Shared post-payment order logic
+```
+
+The core principle: **never rely on gateway metadata for internal context**. Instead, store a `checkout_sessions` row in your own database before invoking the gateway. Both gateways' confirmation paths look it up by `gateway_session_id`.
+
+### System Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Client (Browser)                           │
+└──────────────┬──────────────────────────────────┬───────────────────┘
+               │ POST /api/checkout               │ redirect back
+               ▼                                  ▼
+┌──────────────────────────┐       ┌──────────────────────────────────┐
+│     Checkout Route       │       │     /checkout/success             │
+│                          │       │  (Stripe: show success)           │
+│  1. validate cart        │       │  (PayPal: call /api/paypal/capture)│
+│  2. insert session row   │       └───────────────┬──────────────────┘
+│  3. getActiveGateway()   │                       │
+│  4. gateway.createCheckout│                      ▼
+│  5. backfill session id  │       ┌──────────────────────────────────┐
+└────────────┬─────────────┘       │   Confirmation Entry Points      │
+             │                     │                                  │
+             ▼                     │  Stripe: /api/stripe/webhook     │
+┌──────────────────────────┐       │  PayPal: /api/paypal/capture     │
+│      Gateway Factory     │       │  PayPal: /api/paypal/webhook     │
+│                          │       └───────────────┬──────────────────┘
+│  settings table          │                       │
+│  → active_gateway        │                       ▼
+│                          │       ┌──────────────────────────────────┐
+│  gateway_credentials     │       │   createOrderFromPayment()       │
+│  → decrypt (AES-256-GCM)│       │                                  │
+│                          │       │  1. lookup checkout_sessions     │
+│  env vars (fallback)     │       │  2. idempotency check            │
+└────────────┬─────────────┘       │  3. create order + items         │
+             │                     │  4. clear cart                   │
+             ▼                     │  5. mark session completed       │
+┌──────────────────────────┐       │  6. side effects                 │
+│   PaymentGateway impls   │       └──────────────────────────────────┘
+│                          │
+│  ┌────────┐  ┌────────┐ │       ┌──────────────────────────────────┐
+│  │ Stripe │  │ PayPal │ │       │         Database (D1)            │
+│  └────────┘  └────────┘ │       │                                  │
+└──────────────────────────┘       │  settings                        │
+                                   │  gateway_credentials (encrypted) │
+                                   │  checkout_sessions               │
+                                   │  orders / order_items            │
+                                   │  carts / cart_items              │
+                                   └──────────────────────────────────┘
+```
+
+## The Gateway Interface
+
+```typescript
+interface PaymentGateway {
+  readonly name: "stripe" | "paypal";
+  createCheckout(db: Database, params: CheckoutParams): Promise<CheckoutResult>;
+  verifyWebhook(request: Request, body: string): Promise<WebhookEvent | null>;
+}
+
+interface CheckoutResult {
+  sessionId: string;  // stripe session id / paypal order id
+  url: string;        // redirect URL for the customer
+  subtotalCents: number;
+  shippingCents: number;
+  taxCents: number;
+  totalCents: number;
+}
+
+interface WebhookEvent {
+  type: "payment.completed";
+  sessionId: string;  // used to look up checkout_sessions
+  paymentId: string;
+  email: string;
+  shippingDetails: ShippingDetails;
+  amountTotalCents: number;
+  shippingCostCents: number;
+}
+```
+
+Notice `WebhookEvent` carries no free-form `metadata` map. Internal context is resolved from the database, not from the gateway.
+
+## Database Design
+
+### Settings Table
+
+A simple key-value store for the active gateway:
+
+```sql
+CREATE TABLE settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+-- Seed: key='active_gateway', value='stripe'
+```
+
+### Encrypted Credentials
+
+Gateway secrets are encrypted at rest with AES-256-GCM:
+
+```sql
+CREATE TABLE gateway_credentials (
+  gateway TEXT PRIMARY KEY,
+  encrypted_json TEXT NOT NULL,
+  iv TEXT NOT NULL,
+  auth_tag TEXT NOT NULL,
+  updated_at INTEGER DEFAULT (unixepoch()),
+  updated_by TEXT REFERENCES users(id)
+);
+```
+
+### Checkout Sessions (The Key Insight)
+
+This table is the bridge between your business logic and the gateway:
+
+```sql
+CREATE TABLE checkout_sessions (
+  id TEXT PRIMARY KEY,
+  gateway TEXT NOT NULL,
+  gateway_session_id TEXT UNIQUE,
+  cart_id TEXT,
+  user_id TEXT REFERENCES users(id),
+  email TEXT,
+  discount_code_id TEXT,
+  discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+  subtotal_cents INTEGER NOT NULL DEFAULT 0,
+  shipping_cents INTEGER NOT NULL DEFAULT 0,
+  total_cents INTEGER NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER DEFAULT (unixepoch()),
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Status transitions: `pending` → `completed` | `failed`. The session is only marked `completed` when an order is successfully created.
+
+## The Unified Checkout Flow
+
+Both gateways follow the same three-phase flow:
+
+### Phase 1 — Create
+
+```typescript
+// 1. Validate cart, compute amounts
+// 2. Insert checkout_sessions row (status=pending)
+// 3. Call gateway.createCheckout()
+// 4. Backfill gateway_session_id
+// 5. Return { url, sessionId } to client
+```
+
+### Phase 2 — Confirm
+
+- **Stripe:** `checkout.session.completed` webhook
+- **PayPal:** synchronous `captureOrder` on return URL, plus webhook as fallback
+
+Both normalize into a `WebhookEvent` and call the shared `createOrderFromPayment`.
+
+### Phase 3 — Order Creation
+
+```typescript
+async function createOrderFromPayment(db, event, gatewayName, request) {
+  // 1. Look up checkout_sessions by event.sessionId
+  // 2. If not found → unknown session, return null
+  // 3. If status === 'completed' → idempotent no-op (dedup)
+  // 4. Read cart_id, user_id, discount from session row
+  // 5. Create order + line items, clear cart
+  // 6. Mark session completed (atomic with order insert)
+  // 7. Side effects: email, analytics, stock deduction, fulfillment
+}
+```
+
+The idempotency anchor is the session status — not a gateway-specific dedup key. This works identically for both providers.
+
+### Stripe Checkout Sequence
+
+```
+Customer          /api/checkout        DB             Stripe API         /api/stripe/webhook
+   │                   │                │                  │                    │
+   │── POST checkout ─▶│                │                  │                    │
+   │                   │── insert ─────▶│                  │                    │
+   │                   │  (session row, │                  │                    │
+   │                   │   status=pending)                 │                    │
+   │                   │◀───────────────│                  │                    │
+   │                   │                │                  │                    │
+   │                   │── createCheckout ────────────────▶│                    │
+   │                   │◀── { sessionId, url } ───────────│                    │
+   │                   │                │                  │                    │
+   │                   │── update ─────▶│                  │                    │
+   │                   │  (backfill     │                  │                    │
+   │                   │   gateway_session_id)             │                    │
+   │                   │◀───────────────│                  │                    │
+   │                   │                │                  │                    │
+   │◀── { url } ──────│                │                  │                    │
+   │                   │                │                  │                    │
+   │── redirect to Stripe hosted page ──────────────────▶│                    │
+   │                   │                │                  │                    │
+   │   (customer pays on Stripe page)  │                  │                    │
+   │                   │                │                  │                    │
+   │                   │                │                  │── webhook POST ───▶│
+   │                   │                │                  │                    │
+   │                   │                │                  │    verifyWebhook() │
+   │                   │                │                  │    → WebhookEvent  │
+   │                   │                │                  │                    │
+   │                   │                │◀── lookup session by sessionId ──────│
+   │                   │                │── session row ──────────────────────▶│
+   │                   │                │                  │                    │
+   │                   │                │◀── insert order + clear cart ────────│
+   │                   │                │◀── mark session completed ───────────│
+   │                   │                │                  │                    │
+   │                   │                │                  │◀── 200 {received} ─│
+   │                   │                │                  │                    │
+   │◀── redirect to /checkout/success ──────────────────│                    │
+```
+
+### PayPal Checkout Sequence
+
+```
+Customer       /api/checkout       DB          PayPal API      /checkout/success    /api/paypal/capture
+   │                │               │               │                  │                    │
+   │── POST ───────▶│               │               │                  │                    │
+   │                │── insert ────▶│               │                  │                    │
+   │                │  (session,    │               │                  │                    │
+   │                │   pending)    │               │                  │                    │
+   │                │◀──────────────│               │                  │                    │
+   │                │               │               │                  │                    │
+   │                │── createCheckout ───────────▶│                  │                    │
+   │                │◀── { orderId, approveUrl } ──│                  │                    │
+   │                │               │               │                  │                    │
+   │                │── update ────▶│               │                  │                    │
+   │                │  (backfill    │               │                  │                    │
+   │                │   gateway_session_id)         │                  │                    │
+   │                │◀──────────────│               │                  │                    │
+   │                │               │               │                  │                    │
+   │◀── { url } ───│               │               │                  │                    │
+   │                │               │               │                  │                    │
+   │── redirect to PayPal approve page ──────────▶│                  │                    │
+   │                │               │               │                  │                    │
+   │   (customer approves on PayPal)│               │                  │                    │
+   │                │               │               │                  │                    │
+   │◀── redirect to /checkout/success?token=<orderId> ──────────────▶│                    │
+   │                │               │               │                  │                    │
+   │                │               │               │                  │── POST capture ───▶│
+   │                │               │               │                  │                    │
+   │                │               │               │◀── captureOrder ─────────────────────│
+   │                │               │               │── { COMPLETED, captureId } ─────────▶│
+   │                │               │               │                  │                    │
+   │                │               │               │                  │    verifyWebhook() │
+   │                │               │               │                  │    → WebhookEvent  │
+   │                │               │               │                  │                    │
+   │                │               │◀── lookup session by orderId ───────────────────────│
+   │                │               │── session row ─────────────────────────────────────▶│
+   │                │               │               │                  │                    │
+   │                │               │◀── insert order + clear cart ───────────────────────│
+   │                │               │◀── mark session completed ──────────────────────────│
+   │                │               │               │                  │                    │
+   │                │               │               │                  │◀── { orderId } ───│
+   │                │               │               │                  │                    │
+   │◀── show success page ────────────────────────────────────────────│                    │
+   │                │               │               │                  │                    │
+   │                │               │               │   (async fallback)                    │
+   │                │               │               │── PAYMENT.CAPTURE.COMPLETED webhook ─▶│
+   │                │               │               │                  │   (dedup: session  │
+   │                │               │               │                  │    already completed)
+```
+
+## Gateway Factory
+
+The factory reads the active gateway from the database and resolves credentials with a priority chain: DB (encrypted) > environment variables.
+
+```typescript
+async function getActiveGateway(db: Database): Promise<PaymentGateway> {
+  const [row] = await db.select().from(settings)
+    .where(eq(settings.key, "active_gateway")).limit(1);
+
+  const name = row?.value ?? "stripe";
+  const creds = await getGatewayCredentials(db, name);
+
+  if (name === "paypal") {
+    return new PayPalGateway(creds.clientId, creds.clientSecret, creds.env, creds.webhookId);
+  }
+  return new StripeGateway(creds.secretKey, creds.webhookSecret);
+}
+```
+
+Switching gateways is a single database update — no deploy required. Existing orders are unaffected.
+
+## Credential Encryption
+
+Secrets are encrypted with AES-256-GCM using the Web Crypto API (native in Cloudflare Workers):
+
+```typescript
+export async function encryptCredentials(plaintext: string, masterKeyHex: string) {
+  const key = await importKey(masterKeyHex);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plaintext);
+  const cipherBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+
+  const cipherBytes = new Uint8Array(cipherBuffer);
+  const ciphertext = cipherBytes.slice(0, cipherBytes.length - 16);
+  const authTag = cipherBytes.slice(cipherBytes.length - 16);
+
+  return {
+    ciphertext: bytesToHex(ciphertext),
+    iv: bytesToHex(iv),
+    authTag: bytesToHex(authTag),
+  };
+}
+```
+
+The master key is stored as a platform secret (wrangler secret), never in the database or code.
+
+Security rules:
+- GET endpoints never return plaintext secrets (only masked: `sk_l••••••••xxx`)
+- Frontend inputs use `type="password"`
+- `updated_by` records the operator
+- Admin role required for all credential operations
+
+## PayPal-Specific Handling
+
+PayPal's flow differs from Stripe's webhook-first model:
+
+1. `createCheckout` → create PayPal order (intent=CAPTURE) → return approve URL
+2. Customer approves on PayPal → redirect to `/checkout/success?token=<orderId>`
+3. Success page calls `/api/paypal/capture` with the order id
+4. Capture success → `createOrderFromPayment` creates the order
+5. PayPal webhook (`PAYMENT.CAPTURE.COMPLETED`) as fallback reconciliation
+
+The capture is synchronous — the customer sees immediate confirmation. The webhook is a safety net for edge cases (browser closed, network timeout).
+
+## Failure Handling
+
+Core principle: **orders are only created after payment confirmation**. Any failure path produces no order; the cart is always preserved.
+
+| Scenario | Stripe | PayPal |
+| --- | --- | --- |
+| Cancel | Redirect to `/checkout`, cart intact | Redirect to `/checkout`, cart intact |
+| Payment failure | Handled on Stripe page, retry in place | Capture fails → redirect with error, cart intact |
+| Order created? | Only on webhook | Only on successful capture |
+| Session status | `pending` until webhook | `pending` → `completed` / `failed` |
+
+## Admin Management UI
+
+The admin settings page provides:
+
+- Radio toggle for active gateway (instant switch, affects new orders only)
+- Per-gateway credential forms with masked display
+- Test Connection button (calls provider API to verify credentials)
+- All operations logged with operator identity
+
+## Backward Compatibility
+
+When migrating from a Stripe-only setup:
+
+- Existing `stripe_session_id` / `stripe_payment_intent_id` columns retained
+- Migration backfills `gateway_session_id` from `stripe_session_id`
+- Old orders default to `gateway='stripe'`
+- Original `src/lib/stripe.ts` becomes a re-export shim
+
+## Key Takeaways
+
+1. **Own your checkout state.** Never trust gateway metadata as your source of truth. A local `checkout_sessions` table makes the confirmation flow identical across providers.
+
+2. **Interface + Factory.** A `PaymentGateway` interface with a database-driven factory gives you runtime switching without deploys.
+
+3. **Encrypt at rest.** Gateway credentials in the database must be encrypted. AES-256-GCM with a platform-managed master key is the minimum bar.
+
+4. **Idempotency by design.** Use the session status as your dedup anchor. Webhooks will fire multiple times — your system must handle this gracefully.
+
+5. **Preserve the cart on failure.** Customers who fail payment should never lose their cart. The order only exists after confirmed payment.

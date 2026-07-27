@@ -1,0 +1,297 @@
+---
+title: Email Capture and Discount Codes for Indie E-Commerce
+description: Design a homepage marketing system with email subscription popups, welcome discount codes, and server-side validation — without a marketing platform.
+sidebar:
+  order: 0
+---
+
+Every indie store owner knows the problem: traffic comes, traffic goes, and you have nothing to show for it. No email list, no second chance, no way to bring visitors back.
+
+The standard solution is to plug in a marketing platform — Klaviyo, Mailchimp, Omnisend. But for a small store running on Cloudflare Workers, that means another SaaS dependency, another monthly bill, and another integration surface to maintain.
+
+What if you could build the core marketing loop yourself? Email capture → welcome discount → first purchase. Three components, one database, zero external services (beyond SMTP).
+
+This post walks through the design thinking behind a self-hosted marketing system for an indie e-commerce store.
+
+## The Marketing Loop
+
+Before writing any code, let's think about what we're actually building:
+
+```
+Visitor lands on homepage
+        │
+        ▼
+Sees announcement bar: "Get 15% off your first order"
+        │
+        ▼
+Popup appears (4s delay, first visit only)
+        │
+        ▼
+Enters email → receives WELCOME15 code via email
+        │
+        ▼
+Browses products → adds to cart → goes to checkout
+        │
+        ▼
+Enters WELCOME15 → sees discounted total → completes purchase
+        │
+        ▼
+Redemption recorded → code cannot be reused
+```
+
+Each step has a failure mode. The popup might be annoying. The email might not arrive. The code might be shared on coupon sites. Let's address each.
+
+## Why Not Just Use a Platform?
+
+A fair question. Here's the calculus for an indie store doing fewer than 1000 orders/month:
+
+| Concern | Platform (Klaviyo) | Self-hosted |
+| --- | --- | --- |
+| Cost | $20-150/month | $0 (SMTP is free) |
+| Email sequences | Built-in | Not built (YAGNI for now) |
+| A/B testing | Built-in | Not built |
+| Data ownership | Their servers | Your D1 database |
+| Integration complexity | API keys, webhooks, SDK | One server function |
+| Popup customization | Limited by their widget | Full control |
+
+For a store at this scale, the platform's advanced features (flows, segments, predictive analytics) are overkill. What you need is: capture email, send code, validate code. That's a weekend of work, not a monthly subscription.
+
+The key YAGNI decisions:
+- No email sequences (welcome series, abandoned cart) — just one welcome email
+- No A/B testing framework — just ship the popup
+- No exit-intent detection — a simple 4s delay is enough
+- No generic promotion engine — just discount codes with specific rules
+
+## Data Model: Three Tables
+
+### newsletter_subscribers
+
+```sql
+CREATE TABLE newsletter_subscribers (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE,
+  source TEXT,              -- "homepage_popup" / "footer" / "inline_section"
+  discount_code_sent_at INTEGER,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Why track `source`? Because you want to know which capture point converts best. The popup, the inline section, and the footer form all share the same server function, but the source tag tells you where the subscriber came from.
+
+Why `discount_code_sent_at`? Idempotency. If the subscribe function is called twice (double-click, retry), you don't send two welcome emails. The timestamp tells you "we already sent the code."
+
+### discount_codes
+
+```sql
+CREATE TABLE discount_codes (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE,           -- "WELCOME15"
+  type TEXT,                  -- "percent" / "fixed" / "free_shipping"
+  value_bps INTEGER,          -- percent: basis points (1500 = 15%); fixed: cents
+  description TEXT,
+  max_redemptions INTEGER,    -- global usage cap
+  per_user_limit INTEGER DEFAULT 1,
+  first_order_only INTEGER DEFAULT 0,
+  starts_at INTEGER,
+  ends_at INTEGER,
+  is_active INTEGER DEFAULT 1,
+  created_at INTEGER DEFAULT (unixepoch()),
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Why basis points instead of a float percentage? Because floating-point arithmetic on money is a bug factory. `15% of $33.33` in floats is `4.9995`. In integer cents with basis points: `3333 * 1500 / 10000 = 499` (rounds to $4.99). No ambiguity.
+
+Why `first_order_only`? The welcome discount exists to convert first-time buyers. If someone creates a new email for every order, that's fraud — but at indie scale, the cost of a few extra 15% discounts is far less than the engineering cost of preventing it.
+
+### discount_redemptions
+
+```sql
+CREATE TABLE discount_redemptions (
+  id TEXT PRIMARY KEY,
+  discount_code_id TEXT REFERENCES discount_codes(id),
+  order_id TEXT REFERENCES orders(id),
+  user_email TEXT,
+  discount_amount_cents INTEGER,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Why denormalize `user_email`? The `per_user_limit` and `first_order_only` checks need to count redemptions by email. Joining through orders → users on every validation would work, but a direct email column makes the query trivial and indexable.
+
+## Discount Validation: Think Like an Attacker
+
+The validation logic is the security-critical part. Let's think about what can go wrong:
+
+1. **Client-side only validation.** Attacker skips the frontend, calls the checkout API directly with a fake discount.
+2. **Race condition.** Two concurrent checkouts both validate the same code when only one redemption remains.
+3. **Code enumeration.** Attacker tries codes until they find a valid one.
+4. **Replay.** Attacker reuses a code that's already been redeemed.
+
+Our defense:
+
+```
+validateDiscountCode(code, email):
+  1. Look up code in DB
+     - Not found → reject
+     - is_active = 0 → reject
+     - Outside time range → reject
+     - Redemption count >= max_redemptions → reject
+
+  2. Count redemptions for this email + code
+     - count >= per_user_limit → reject
+
+  3. If first_order_only:
+     Count non-cancelled orders for this email
+     - count > 0 → reject
+
+  4. Compute discount amount:
+     - percent: Math.round(subtotal_cents * value_bps / 10000)
+     - fixed: min(value_bps, subtotal_cents)
+     - free_shipping: shipping_cents
+
+  5. Return { valid: true, type, discountAmountCents }
+```
+
+Critical: **all error responses are generic**. "Invalid or expired code." Never "code exists but is expired" or "you've already used this code." Specific errors leak information that helps attackers enumerate valid codes.
+
+And the most important rule: **validation happens twice**. Once on the frontend (for UX — show the green checkmark), and again on the server when creating the checkout session. The frontend validation is a courtesy. The server validation is the law.
+
+## Checkout Integration
+
+The discount flows through checkout as a negative line item:
+
+```
+/checkout page
+  │
+  ├─ User enters code → validateDiscountCode() (server fn)
+  │   Returns { valid, type, discountAmountCents }
+  │
+  ├─ Frontend displays discounted total (display only)
+  │
+  └─ "Place Order" → create checkout session (server)
+      ├─ 1. RE-VALIDATE code server-side (never trust client)
+      ├─ 2. Compute: subtotal - discount = final_total
+      ├─ 3. Add negative line item to gateway line_items
+      └─ 4. Webhook/capture handler:
+            ├─ Create order with discount_cents
+            └─ INSERT discount_redemptions (atomic with order)
+```
+
+Why a negative line item instead of just reducing the total? Because the payment gateway (Stripe, PayPal) needs to see line items that sum to the total. If you just set `total = subtotal - discount` without a line item, the gateway's own math won't add up and it will reject the session.
+
+## The Email Capture Popup
+
+The popup is the most UX-sensitive component. Get it wrong and you annoy visitors. Get it right and you convert 3-5% of visitors into subscribers.
+
+Design decisions:
+
+- **4-second delay.** Immediate popups are hostile. Give the visitor time to orient.
+- **First visit only.** `localStorage` flag with 7-day cooldown. Returning visitors aren't new customers.
+- **Two-step interaction.** Step 1: "Want 15% off?" with Yes/No. Step 2: email input. The micro-commitment of clicking "Yes" increases completion rate.
+- **Mobile: bottom sheet.** Centered dialogs on mobile feel like ads. Bottom sheets feel native.
+- **Not dismissible by clicking outside.** If they clicked "Yes," they intended to enter their email. Accidental backdrop clicks shouldn't lose that intent.
+
+```
+┌─────────────────────────────────┐
+│  Want 15% off your first order? │
+│                                 │
+│  [Yes, send me the code]        │
+│  [No thanks]                    │
+└─────────────────────────────────┘
+              │
+              ▼ (click Yes)
+┌─────────────────────────────────┐
+│  Enter your email:              │
+│  [________________________]     │
+│                                 │
+│  [Send my code]                 │
+│  We'll never spam you.          │
+└─────────────────────────────────┘
+              │
+              ▼ (submit)
+┌─────────────────────────────────┐
+│  Check your inbox!              │
+│  Code arrives in ~2 minutes.    │
+│                                 │
+│  [Start shopping]               │
+└─────────────────────────────────┘
+```
+
+## Announcement Bar
+
+A persistent bar above the header, rotating two messages:
+
+1. "Free shipping on orders over $49" → links to collections
+2. "New here? Get 15% off — join our list" → triggers the popup
+
+Why not dismissible? Because it's the store's value proposition. Free shipping and a welcome discount are reasons to buy. Hiding them reduces conversion.
+
+On mobile, show only the free shipping message (no rotation). Screen space is precious, and the free shipping message has broader appeal.
+
+## Admin: Discount Code Management
+
+The admin panel needs CRUD for discount codes, but with one important constraint: **you cannot delete a code that has redemptions**.
+
+Why? Because `discount_redemptions` references `discount_code_id`. Deleting the code would orphan the redemption records, breaking order history and analytics. Instead, you deactivate it (`is_active = 0`). The code stops working for new orders, but historical records remain intact.
+
+If a code has zero redemptions (a typo, a test), hard delete is fine.
+
+## Security Considerations
+
+- **Rate limiting.** `subscribeNewsletter` is limited to 5 requests/minute per IP. Without this, an attacker can flood your SMTP server.
+- **Zod validation.** Email format, max lengths, trimmed input. Never trust client data.
+- **Server-side price computation.** The client displays the discounted total, but the server computes it independently. A tampered client cannot change the actual charge.
+- **Atomic redemption.** The redemption record is inserted in the same database batch as the order. Either both succeed or neither does. No "order created but discount not recorded" state.
+
+## What We Deliberately Didn't Build
+
+- **Cart free-shipping progress bar.** Nice-to-have, but the announcement bar covers the messaging.
+- **Email sequences.** Welcome series, abandoned cart, post-purchase follow-up. These require a scheduling system and template management. At fewer than 1000 subscribers, manual email is fine.
+- **A/B testing.** We don't have enough traffic for statistical significance. Ship one version, measure, iterate manually.
+- **Exit-intent popup.** Requires mouse tracking, doesn't work on mobile, and adds JavaScript weight. The 4s delay popup captures the same audience.
+
+## The Full Picture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Homepage                               │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ AnnouncementBar (free shipping + email CTA)       │   │
+│  └──────────────────────────────────────────────────┘   │
+│  SiteHeader                                              │
+│  Hero                                                    │
+│  ValuePropositions                                       │
+│  FeaturedCollections                                     │
+│  Testimonials                                            │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ NewsletterInline (email capture section)          │   │
+│  └──────────────────────────────────────────────────┘   │
+│  SiteFooter                                              │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ NewsletterPopup (overlay, 4s delay, first visit)  │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+
+         │ subscribeNewsletter()
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  1. Validate email (Zod)                                 │
+│  2. INSERT OR IGNORE into newsletter_subscribers         │
+│  3. If new: send welcome email with WELCOME15 code       │
+│  4. Return { success: true }                             │
+└─────────────────────────────────────────────────────────┘
+
+         │ customer proceeds to checkout
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  1. validateDiscountCode("WELCOME15", email)             │
+│  2. Server-side: re-validate, compute discount           │
+│  3. Create gateway session with negative line item       │
+│  4. On payment confirmation: record redemption           │
+└─────────────────────────────────────────────────────────┘
+```
+
+The entire system is three database tables, five server functions, and four React components. No marketing platform, no monthly subscription, no vendor lock-in. Just your own code, your own data, and your own customers.
