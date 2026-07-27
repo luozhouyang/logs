@@ -1,0 +1,203 @@
+---
+title: "Database Design: The Product Model for an Indie Store"
+description: Why a product table for an Amazon-FBA indie store looks nothing like a generic e-commerce schema — and the thinking behind every column.
+sidebar:
+  order: 1
+---
+
+The product table is the first thing you design and the last thing you get right. It seems simple — name, price, description, done. But the moment you start selling through Amazon FBA while running your own storefront, the "simple" product table becomes a negotiation between two worlds.
+
+This post walks through the design of a product model for an indie store that sources its catalog from Amazon Seller Central (SP-API) and sells through its own website. Every column exists for a reason. Every omission is a decision.
+
+## The Core Tension: You Don't Own the Source of Truth
+
+In a traditional e-commerce system, the product table IS the source of truth. You create products, you edit them, you delete them.
+
+In our system, Amazon is the source of truth. Products are synced from Seller Central via SP-API. The storefront is a read-heavy projection of Amazon's catalog. This changes everything:
+
+- Products have an `amazon_asin` — the external identifier that links back to Amazon.
+- Products have a `synced_at` timestamp — because the data goes stale.
+- Products have a `status` field — because Amazon might delist an item, and we need to hide it without deleting it.
+- We don't have a `price` column on the product table — because pricing is a separate concern with its own lifecycle.
+
+If you're building a store where you manually enter products, ignore half of what follows. This design is for the "sync from a marketplace" pattern.
+
+## The Schema
+
+```sql
+CREATE TABLE products (
+  id TEXT PRIMARY KEY,
+  amazon_asin TEXT NOT NULL UNIQUE,
+  sku TEXT,
+  title TEXT NOT NULL,
+  description TEXT,
+  bullet_points TEXT,
+  category_id TEXT REFERENCES categories(id),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  stock_quantity INTEGER NOT NULL DEFAULT 0,
+  fba_fulfillment_eligible INTEGER NOT NULL DEFAULT 0,
+  weight_grams INTEGER,
+  dimensions_json TEXT,
+  size_name TEXT,
+  color_name TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  slug TEXT NOT NULL UNIQUE,
+  meta_title TEXT,
+  meta_description TEXT,
+  synced_at INTEGER,
+  created_at INTEGER DEFAULT (unixepoch()),
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Let's walk through the decisions.
+
+## Identity: Why Prefixed IDs?
+
+```typescript
+id: text("id").primaryKey().$defaultFn(() => newId("prd")),
+```
+
+IDs look like `prd_0192f3a4-b5c6-7d8e-9f0a-1b2c3d4e5f67`. Why not auto-increment integers?
+
+1. **No information leakage.** `/products/42` tells an attacker you have ~42 products. `/products/prd_0192f3a4...` tells them nothing.
+2. **Safe in URLs.** UUIDs are URL-safe. Integers invite enumeration attacks.
+3. **Distributed-friendly.** If you ever shard or replicate, integer IDs collide. UUIDs don't.
+4. **The prefix aids debugging.** In logs, `ord_abc` is obviously an order, `prd_def` is obviously a product. No ambiguity.
+
+The `newId` function generates UUID v7 (time-ordered) with a prefix. Time-ordered means B-tree indexes stay sequential — no random I/O on insert.
+
+## The Amazon Link: `amazon_asin`
+
+```typescript
+amazonAsin: text("amazon_asin").notNull().unique(),
+```
+
+This is the foreign key to the external world. It's `NOT NULL` because every product in our store originates from Amazon. It's `UNIQUE` because one ASIN maps to exactly one product row.
+
+Why not make `amazon_asin` the primary key? Because ASINs are Amazon's identifier, not ours. If we ever source products from another marketplace, we'd need to change the primary key. Our own `id` is stable regardless of where the data comes from.
+
+The `sku` field is nullable because not all catalog items have a seller-defined SKU. Some are identified only by ASIN.
+
+## Content Fields: What to Store Locally
+
+```typescript
+title: text("title").notNull(),
+description: text("description"),
+bulletPoints: text("bullet_points"),
+```
+
+Why store title and description locally instead of fetching from Amazon on every page load?
+
+1. **Latency.** A D1 query is ~1ms. An SP-API call is ~200-500ms. Product pages are the highest-traffic pages.
+2. **Availability.** If SP-API is down, your store still works.
+3. **Customization.** You might want to edit the title for SEO without changing the Amazon listing.
+
+Why `bullet_points` as a single TEXT column instead of a separate table? Because Amazon returns them as a JSON array of 5 strings. They're always read together, never queried individually. A separate table adds joins for zero benefit. Store as JSON, parse on read.
+
+## Why No Price Column?
+
+This surprises people. Where's the price?
+
+Pricing lives in a separate `prices` table with its own lifecycle:
+
+- Prices change more often than product metadata.
+- Prices can be scheduled (start/end dates for promotions).
+- A product can have multiple price points (regular, sale, member).
+- Price history matters for analytics.
+
+Mixing price into the product table means every price change updates the product row, invalidating caches and bloating the update log. Separation of concerns keeps each table's write pattern clean.
+
+## Stock: The Denormalized Counter
+
+```typescript
+stockQuantity: integer("stock_quantity").notNull().default(0),
+```
+
+Stock is synced from Amazon's inventory API. It's a snapshot — always slightly stale. Why store it at all if it's approximate?
+
+Because the storefront needs to show "In Stock" / "Out of Stock" without calling SP-API on every product page load. The sync job updates this field periodically (every 15 minutes). It's a cache, not a source of truth. The real stock check happens at fulfillment time.
+
+## FBA Eligibility: The Fulfillment Gate
+
+```typescript
+fbaFulfillmentEligible: integer("fba_fulfillment_eligible", { mode: "boolean" })
+  .notNull().default(false),
+```
+
+Not every product can be fulfilled by Amazon. Some are FBM (Fulfilled by Merchant), some are restricted. This flag gates the checkout flow: if a product isn't FBA-eligible, we can't promise 2-day shipping, and the fulfillment logic needs to handle it differently.
+
+Why a boolean on the product instead of a lookup at checkout time? Because the product listing page needs to show shipping estimates. You can't call SP-API for every product card on a collection page.
+
+## Physical Properties: Weight and Dimensions
+
+```typescript
+weightGrams: integer("weight_grams"),
+dimensionsJson: text("dimensions_json"),
+sizeName: text("size_name"),
+colorName: text("color_name"),
+```
+
+These exist for shipping cost calculation. The shipping rate depends on weight and dimensions. We store them locally so the checkout flow can compute shipping without an API call.
+
+`dimensions_json` stores `{"length": 10, "width": 5, "height": 3, "unit": "inches"}`. Why JSON instead of three columns? Because the unit varies (inches vs cm) and Amazon sometimes provides additional fields. A rigid schema would need migration every time Amazon adds a dimension attribute.
+
+`size_name` and `color_name` are variant identifiers. We don't have a full variant system (size × color matrix) because our catalog doesn't need it. Each ASIN is already a specific size+color combination. These fields are for display, not for variant selection.
+
+## SEO: Slug and Meta
+
+```typescript
+slug: text("slug").notNull().unique(),
+metaTitle: text("meta_title"),
+metaDescription: text("meta_description"),
+```
+
+The `slug` is the URL path: `/products/stainless-steel-water-bottle-32oz`. It's generated from the title at sync time and is editable by the admin.
+
+`meta_title` and `meta_description` are nullable because they're optional overrides. If null, the frontend falls back to the product title and a truncated description. This avoids duplicating content while allowing SEO customization where it matters.
+
+## Status: Soft Lifecycle
+
+```typescript
+status: text("status").notNull().default("active"),
+```
+
+Values: `active`, `inactive`, `archived`.
+
+Why not a boolean `is_active`? Because there are three states, not two:
+
+- `active`: visible on the storefront, purchasable.
+- `inactive`: hidden from the storefront, but existing orders still reference it.
+- `archived`: admin-only, kept for historical records.
+
+A boolean can't express "hidden but not deleted." And we never delete products — orders reference them forever.
+
+## Sync Timestamp: The Staleness Signal
+
+```typescript
+syncedAt: integer("synced_at", { mode: "timestamp" }),
+```
+
+This tells you when the row was last updated from SP-API. It serves two purposes:
+
+1. **Sync logic.** The sync job can query "products not synced in the last 24 hours" to find stale data.
+2. **Admin visibility.** The admin panel shows "last synced 3 hours ago" so the operator knows the data is fresh.
+
+It's nullable because manually created products (admin override) were never synced.
+
+## What's Not Here (And Why)
+
+- **No `images` column.** Images live in a separate `media` table with ordering, alt text, and CDN URLs. A product has many images.
+- **No `variants` table.** Each ASIN is already a specific variant. We don't sell configurable products (pick your size/color on the product page). The catalog is flat.
+- **No `vendor`/`brand` field.** We sell one brand. Adding a brand column for a single value is noise.
+- **No `tags` table.** Categories are sufficient for our navigation. Tags add complexity without user-facing benefit at this scale.
+
+## The Thinking Framework
+
+When designing a model, ask three questions for every column:
+
+1. **Who writes this?** If it's a sync job, the column is a cache. If it's an admin, it's editable. If it's a customer, it's input.
+2. **Who reads this, and how often?** Product pages read title/description millions of times. Admin panels read `synced_at` a few times a day. Optimize storage for the hot path.
+3. **What happens if this is wrong?** A wrong title is a cosmetic bug. A wrong `stock_quantity` is an oversell. A wrong `amazon_asin` is a fulfillment disaster. The criticality determines your validation strictness.
+
+The product table is where your business model becomes data. Get it wrong and every feature built on top inherits the mistake.

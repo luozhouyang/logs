@@ -1,0 +1,182 @@
+---
+title: "Database Design: The Cart Model and Guest Checkout"
+description: Why a shopping cart needs both userId and sessionId, why cart items don't store prices, and how to handle cart expiry without a cron job.
+sidebar:
+  order: 3
+---
+
+The shopping cart seems trivial. Add item, remove item, show total. But the moment you support guest checkout (no login required), the cart becomes an identity problem. Who owns this cart? How long does it live? What happens when the guest comes back three days later?
+
+This post walks through the design of a cart model that supports both authenticated and guest users, survives browser restarts, and cleanly converts into an order at checkout.
+
+## The Identity Problem
+
+A logged-in user's cart is easy: `cart.user_id = session.user.id`. One user, one cart, persistent forever.
+
+A guest's cart is hard. They have no user ID. They have a browser. The browser has cookies. Cookies can be cleared. The user might switch devices.
+
+Our solution: the cart has two identity columns.
+
+```sql
+CREATE TABLE carts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  session_id TEXT,
+  expires_at INTEGER,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+- `user_id` is set for authenticated users. It's the permanent anchor.
+- `session_id` is set for guests. It's a random token stored in an HTTP-only cookie.
+- Both are nullable. A cart always has at least one.
+
+## Why Two Columns Instead of One?
+
+You could use a single `owner_id` field that holds either a user ID or a session token. Why not?
+
+Because the lookup patterns are different:
+
+- For authenticated users: `WHERE user_id = ?` — this must be fast and indexed. The user expects their cart on every page load.
+- For guests: `WHERE session_id = ?` — this is also fast, but the session token is opaque and unpredictable.
+
+More importantly, the **merge** operation requires both. When a guest logs in (or creates an account at checkout), you need to:
+
+1. Find the guest cart by `session_id`.
+2. Find (or create) the user cart by `user_id`.
+3. Merge items from the guest cart into the user cart.
+4. Delete the guest cart.
+
+If both identities were in one column, you couldn't distinguish "this is a user cart" from "this is a session cart" without parsing the ID format. Two columns make the intent explicit.
+
+## Cart Items: No Price, No Snapshot
+
+```sql
+CREATE TABLE cart_items (
+  id TEXT PRIMARY KEY,
+  cart_id TEXT NOT NULL REFERENCES carts(id),
+  product_id TEXT NOT NULL REFERENCES products(id),
+  quantity INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Notice what's missing: no `unit_price_cents`. The cart item stores only the product reference and quantity.
+
+Why? Because the cart is not a financial record. It's a shopping list. The price that matters is the one at checkout time, not the one when the item was added.
+
+Consider: a customer adds a $25 item to their cart on Monday. On Tuesday, you run a sale and the price drops to $20. On Wednesday, they check out. What do they pay?
+
+- If you stored the price at add-time: $25. The customer is angry — they see $20 on the product page but are charged $25.
+- If you compute the price at checkout: $20. The customer is happy. The cart reflects current reality.
+
+The price is computed fresh at checkout from the `prices` table. The cart is just "which products and how many."
+
+## Why Not Store Prices for Display?
+
+The cart page shows a total. If prices aren't stored, how does the frontend show the total?
+
+The cart page calls a server function that:
+1. Loads cart items (product IDs + quantities)
+2. Fetches current prices for each product
+3. Computes the total
+4. Returns the full cart with prices
+
+This is one extra query per page load. At indie scale, that's fine. The alternative (storing prices and invalidating on price change) adds write complexity for a read that happens infrequently.
+
+## Expiry: The Lazy Cleanup
+
+```typescript
+expiresAt: integer("expires_at", { mode: "timestamp" }),
+```
+
+Guest carts expire. Authenticated carts don't (they're tied to a permanent identity).
+
+But we don't run a cron job to delete expired carts. Why? Because it's unnecessary. The expiry check happens at read time:
+
+```typescript
+async function getCart(db, sessionId) {
+  const [cart] = await db.select().from(carts)
+    .where(and(
+      eq(carts.sessionId, sessionId),
+      gt(carts.expiresAt, new Date())  // not expired
+    ))
+    .limit(1);
+  return cart ?? null;
+}
+```
+
+If the cart is expired, the query returns nothing. The guest gets a fresh cart. The expired row sits in the database harmlessly until the next migration or manual cleanup.
+
+Why not delete on read? Because deletion is a write, and writes on a read path add latency and complexity. A stale row costs ~100 bytes. A million stale rows cost ~100MB. At indie scale, this is a non-problem. Clean up quarterly if it bothers you.
+
+## The Merge: Guest Becomes User
+
+The most complex cart operation happens at checkout when a guest provides their email:
+
+```typescript
+async function mergeGuestCart(db, sessionId, userId) {
+  const guestCart = await getCartBySession(db, sessionId);
+  if (!guestCart) return;
+
+  let userCart = await getCartByUser(db, userId);
+
+  if (!userCart) {
+    // Promote: just reassign the guest cart to the user
+    await db.update(carts)
+      .set({ userId, sessionId: null, expiresAt: null })
+      .where(eq(carts.id, guestCart.id));
+    return;
+  }
+
+  // Merge: add guest items to user cart, handle duplicates
+  const guestItems = await getCartItems(db, guestCart.id);
+  for (const item of guestItems) {
+    const existing = await findCartItem(db, userCart.id, item.productId);
+    if (existing) {
+      // Sum quantities
+      await db.update(cartItems)
+        .set({ quantity: existing.quantity + item.quantity })
+        .where(eq(cartItems.id, existing.id));
+    } else {
+      await db.insert(cartItems).values({
+        cartId: userCart.id,
+        productId: item.productId,
+        quantity: item.quantity,
+      });
+    }
+  }
+
+  // Delete guest cart
+  await db.delete(cartItems).where(eq(cartItems.cartId, guestCart.id));
+  await db.delete(carts).where(eq(carts.id, guestCart.id));
+}
+```
+
+The "promote" path (no existing user cart) is the common case. The "merge" path (user already has a cart from a previous session) handles the edge case where someone browses as a guest, logs in, and already has items from a prior authenticated session.
+
+## One Cart Per User
+
+The schema allows multiple carts per user (no UNIQUE constraint on `user_id`). Should it?
+
+In practice, we enforce one active cart per user at the application level. The `getCartByUser` function returns the most recent cart. Multiple carts can exist due to race conditions (two tabs creating carts simultaneously), but the application always operates on the latest one.
+
+Why not add a UNIQUE constraint? Because the merge operation temporarily creates a state where the user has two carts (the promoted guest cart and the existing user cart). A UNIQUE constraint would make the merge transaction impossible. The application-level invariant is sufficient.
+
+## The Cart-to-Order Boundary
+
+The cart's lifecycle ends at checkout. When payment is confirmed:
+
+1. The `checkout_sessions` row (created before the gateway call) holds the `cart_id`.
+2. The webhook handler reads cart items from `cart_id`.
+3. Order items are created from cart items.
+4. The cart and its items are deleted.
+
+The cart is ephemeral. It exists to bridge "browsing" and "buying." Once the order exists, the cart has served its purpose. Deleting it (rather than marking it "converted") keeps the table small and the queries fast.
+
+## What This Model Doesn't Do
+
+- **No saved-for-later.** That's a separate list with different semantics (no expiry, no quantity urgency).
+- **No cart sharing.** One person, one cart. Sharing adds permission complexity for zero revenue at this scale.
+- **No inventory reservation.** Adding to cart doesn't hold stock. Stock is checked at fulfillment time. Reserving stock on add-to-cart creates orphaned reservations when carts are abandoned.
+- **No price override.** The cart can't carry a custom price. Discounts are applied at checkout via the discount code system, not by modifying cart item prices.

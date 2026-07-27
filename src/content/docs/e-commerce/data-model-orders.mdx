@@ -1,0 +1,192 @@
+---
+title: "Database Design: The Order Model and Why Money Is Always Integer Cents"
+description: Designing an order table that survives payment gateway switches, fulfillment failures, and the eternal floating-point money bug.
+sidebar:
+  order: 2
+---
+
+The order table is the heart of an e-commerce system. Every other table exists to feed it (products, carts) or extend it (shipments, emails). Get the order model wrong and you'll spend months patching edge cases.
+
+This post covers the design of an order model that handles multiple payment gateways, stores money safely, and supports a fulfillment pipeline that talks to Amazon FBA.
+
+## The Money Question: Why Integer Cents?
+
+Before we look at the schema, let's settle the most important design decision: how to store money.
+
+```typescript
+subtotalCents: integer("subtotal_cents").notNull(),
+taxCents: integer("tax_cents").notNull().default(0),
+shippingCents: integer("shipping_cents").notNull().default(0),
+discountCents: integer("discount_cents").notNull().default(0),
+totalCents: integer("total_cents").notNull(),
+```
+
+Every money field is an integer representing cents. Never a float. Never a decimal. Here's why:
+
+```javascript
+// The floating-point money bug
+0.1 + 0.2 === 0.3  // false. It's 0.30000000000000004
+
+// In a real order:
+const subtotal = 19.99;
+const tax = subtotal * 0.08;  // 1.5992000000000002
+const total = subtotal + tax;  // 21.589200000000002
+
+// What do you charge the customer? $21.58? $21.59?
+// The answer depends on when and where you round.
+// Different code paths will round differently. Bugs ensue.
+```
+
+With integer cents:
+
+```javascript
+const subtotalCents = 1999;
+const taxCents = Math.round(subtotalCents * 0.08);  // 160
+const totalCents = subtotalCents + taxCents;  // 2159
+
+// Always $21.59. No ambiguity. No rounding disagreement.
+```
+
+The rule: **money enters the system as cents, stays as cents in the database, and is only formatted to dollars at the presentation layer.** The `Intl.NumberFormat` call in the frontend is the only place division by 100 happens.
+
+## The Schema
+
+```sql
+CREATE TABLE orders (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  stripe_session_id TEXT UNIQUE,
+  stripe_payment_intent_id TEXT,
+  gateway TEXT NOT NULL DEFAULT 'stripe',
+  gateway_session_id TEXT,
+  gateway_payment_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  subtotal_cents INTEGER NOT NULL,
+  tax_cents INTEGER NOT NULL DEFAULT 0,
+  shipping_cents INTEGER NOT NULL DEFAULT 0,
+  discount_cents INTEGER NOT NULL DEFAULT 0,
+  total_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  shipping_address_json TEXT NOT NULL,
+  amazon_order_id TEXT,
+  fulfillment_error TEXT,
+  created_at INTEGER DEFAULT (unixepoch()),
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+
+CREATE INDEX idx_orders_gateway_session ON orders(gateway_session_id);
+```
+
+## The Gateway Fields: A Migration Story
+
+The order table carries both legacy and new gateway fields:
+
+```typescript
+stripeSessionId: text("stripe_session_id").unique(),
+stripePaymentIntentId: text("stripe_payment_intent_id"),
+gateway: text("gateway").notNull().default("stripe"),
+gatewaySessionId: text("gateway_session_id"),
+gatewayPaymentId: text("gateway_payment_id"),
+```
+
+Why both? Because this table existed before the payment gateway abstraction. Old orders have `stripe_session_id` populated. New orders use the generic `gateway_*` fields. The migration backfilled `gateway_session_id` from `stripe_session_id` for historical rows.
+
+Could we have dropped the Stripe-specific columns? No. Existing queries, admin tools, and reconciliation scripts reference them. Removing them would break backward compatibility for zero user-facing benefit. The cost of two extra nullable columns is negligible.
+
+The `gateway` field defaults to `"stripe"` so old rows (inserted before the column existed) are correctly attributed without a backfill.
+
+Why the index on `gateway_session_id`? Because the webhook handler's first query is always "find the order by gateway session ID." This is the hottest read path in the system — it runs on every payment confirmation. Without the index, it's a full table scan.
+
+## Status: The State Machine
+
+```typescript
+status: text("status").notNull().default("pending"),
+```
+
+The order status is a string, not an integer enum. Why?
+
+1. **Readability.** `WHERE status = 'shipped'` is self-documenting. `WHERE status = 3` requires a lookup table in your head.
+2. **Extensibility.** Adding a new status doesn't require a migration. Adding a new integer value requires updating every switch statement.
+3. **Debugging.** When you're reading raw database rows at 2am, `"fulfillment_failed"` tells you what happened. `5` does not.
+
+The valid transitions:
+
+```
+pending → paid → fulfilling → shipped → delivered
+                     ↓
+              fulfillment_failed
+                     
+paid → cancelled (admin action, before fulfillment)
+```
+
+The status is only ever advanced forward (except cancellation). There's no "un-ship" operation. If fulfillment fails, the order enters a terminal error state and an admin must intervene.
+
+## The Address: Why JSON?
+
+```typescript
+shippingAddressJson: text("shipping_address_json").notNull(),
+```
+
+The shipping address is stored as a JSON string, not as normalized columns (address_line1, city, state, zip, country). Why?
+
+1. **It's write-once, read-few.** The address is written at order creation and read for fulfillment and the order detail page. It's never queried by city or filtered by state.
+2. **It's a snapshot.** The customer might move. The order's address must never change. A JSON blob is inherently immutable once written.
+3. **It avoids a join.** Normalized addresses mean an `addresses` table and a foreign key. For a field that's always read as a unit, the join adds latency for zero query flexibility.
+4. **Gateway formats vary.** Stripe returns `shipping_details` with one structure. PayPal returns `purchase_units[0].shipping` with another. Normalizing both into the same columns requires mapping logic anyway. Storing the normalized JSON is the same work, minus the schema rigidity.
+
+The JSON structure:
+
+```json
+{
+  "fullName": "Jane Doe",
+  "addressLine1": "456 Oak Ave",
+  "addressLine2": "",
+  "city": "Portland",
+  "state": "OR",
+  "zipCode": "97201",
+  "country": "US",
+  "phone": "555-9876"
+}
+```
+
+## The Amazon Link: Fulfillment Context
+
+```typescript
+amazonOrderId: text("amazon_order_id"),
+fulfillmentError: text("fulfillment_error"),
+```
+
+When an order is fulfilled via Amazon FBA (SP-API), the resulting Amazon order ID is stored here. This is the link between "our order" and "Amazon's order." Without it, you can't track fulfillment status or reconcile shipments.
+
+`fulfillment_error` stores the last error message if SP-API rejected the fulfillment request. It's a debugging aid — the admin panel shows it so the operator can decide whether to retry or cancel.
+
+Why not a separate `fulfillment_errors` table with history? Because we only retry once. If it fails twice, a human intervenes. A full error history is over-engineering for a system where the admin can just look at the sync logs.
+
+## Order Items: The Line Items
+
+```sql
+CREATE TABLE order_items (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id),
+  product_id TEXT NOT NULL REFERENCES products(id),
+  amazon_asin TEXT NOT NULL,
+  quantity INTEGER NOT NULL,
+  unit_price_cents INTEGER NOT NULL
+);
+```
+
+Why denormalize `amazon_asin` when it's already on the product? Because the product's ASIN could theoretically change (re-listing, correction). The order item's ASIN is the one that was actually fulfilled. It's a snapshot, like the address.
+
+Why store `unit_price_cents` instead of computing it from the product's current price? Because prices change. The order must record what the customer actually paid, not what the product costs today. This is the same snapshot principle as the address.
+
+Why no `discount_cents` per line item? Because our discounts apply to the whole order, not individual items. The order-level `discount_cents` is sufficient. If we ever need per-item discounts (buy-one-get-one), we'd add it then.
+
+## The Thinking Framework
+
+Three principles drove every decision in this model:
+
+1. **Money is integer cents.** No exceptions. No "we'll use floats but be careful." You won't be careful. The language won't let you.
+
+2. **Snapshots over references.** The address, the price, the ASIN — all frozen at order time. An order is a historical record. It must not change when the underlying data changes.
+
+3. **Backward compatibility is a feature.** The legacy Stripe columns cost nothing to keep and everything to remove. Schema evolution is additive. You add columns, you don't remove them.

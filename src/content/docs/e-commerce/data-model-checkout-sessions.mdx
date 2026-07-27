@@ -1,0 +1,216 @@
+---
+title: "Database Design: The Checkout Session as Single Source of Truth"
+description: Why you need a local checkout session table between your business logic and the payment gateway — and why gateway metadata is a trap.
+sidebar:
+  order: 4
+---
+
+Here's a bug that will haunt you if you build a payment integration naively: the customer pays, the webhook fires, and your handler needs to create an order. But the webhook payload doesn't contain your cart ID, your user ID, or your discount code. Where did that context go?
+
+If you stuffed it into the gateway's `metadata` field, you might be fine with Stripe. But the moment you add PayPal — where `custom_id` is a 127-character string with no structure guarantees — your context is lost. Orders get created without line items. Carts never get cleared. Discounts never get recorded.
+
+The fix is a `checkout_sessions` table. It's the most important table nobody thinks about until it's too late.
+
+## The Problem with Gateway Metadata
+
+Both Stripe and PayPal let you attach custom data to a payment:
+
+- Stripe: `metadata` — a key-value map, up to 50 keys, 500 chars per value. Reliable.
+- PayPal: `custom_id` — a single string, 127 chars. No structure. Not guaranteed on all webhook paths.
+
+The tempting approach:
+
+```typescript
+// Don't do this
+const session = await stripe.checkout.sessions.create({
+  metadata: {
+    cartId: "crt_abc123",
+    userId: "usr_def456",
+    discountCodeId: "dsc_ghi789",
+    discountAmountCents: "500",
+  },
+});
+```
+
+This works with Stripe. Then you add PayPal:
+
+```typescript
+// This is where it breaks
+const order = await paypal.orders.create({
+  purchase_units: [{
+    custom_id: JSON.stringify({
+      cartId: "crt_abc123",
+      userId: "usr_def456",
+      discountCodeId: "dsc_ghi789",
+      discountAmountCents: 500,
+    }),
+    // ...
+  }],
+});
+```
+
+Problems:
+1. `custom_id` is 127 chars. That JSON is 95 chars. Add a longer user ID and it overflows.
+2. PayPal's webhook for `PAYMENT.CAPTURE.COMPLETED` doesn't always include `custom_id`. The fallback reconciliation path loses your context entirely.
+3. You're parsing JSON from a stringly-typed field in a webhook handler that must never crash. One malformed payload and orders stop being created.
+
+The industry best practice (used by Stripe's own architecture, and by payment orchestration layers like Primer and Spreedly): **never rely on gateway metadata for internal context.**
+
+## The Solution: A Local Session Row
+
+```sql
+CREATE TABLE checkout_sessions (
+  id TEXT PRIMARY KEY,
+  gateway TEXT NOT NULL,
+  gateway_session_id TEXT UNIQUE,
+  cart_id TEXT REFERENCES carts(id),
+  user_id TEXT REFERENCES users(id),
+  email TEXT,
+  discount_code_id TEXT REFERENCES discount_codes(id),
+  discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+  subtotal_cents INTEGER NOT NULL DEFAULT 0,
+  shipping_cents INTEGER NOT NULL DEFAULT 0,
+  total_cents INTEGER NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER DEFAULT (unixepoch()),
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+This row is created **before** the gateway is invoked. It holds everything the webhook handler needs. The gateway only needs to return its transaction ID — everything else is resolved locally.
+
+## The Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  POST /api/checkout                                              │
+│                                                                  │
+│  1. Validate cart, compute amounts                               │
+│  2. INSERT checkout_sessions (status=pending, gateway_session_id=NULL) │
+│  3. Call gateway.createCheckout(...)                             │
+│  4. UPDATE checkout_sessions SET gateway_session_id = result.id  │
+│  5. Return { url } to client                                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ (customer pays on gateway page)
+┌─────────────────────────────────────────────────────────────────┐
+│  Webhook / Capture handler                                       │
+│                                                                  │
+│  1. Receive gateway_session_id from webhook/capture response     │
+│  2. SELECT * FROM checkout_sessions                              │
+│     WHERE gateway_session_id = ?                                 │
+│  3. If not found → log, return (unknown session)                 │
+│  4. If status = 'completed' → return (idempotent, already done)  │
+│  5. Read cart_id, user_id, discount from the row                 │
+│  6. Create order + order items from cart                         │
+│  7. Clear cart                                                   │
+│  8. UPDATE checkout_sessions SET status = 'completed'            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The session row is the bridge. It carries context across the redirect to the gateway and back. The gateway is a black box that takes money and returns a transaction ID. Everything else is yours.
+
+## Why `gateway_session_id` Is Nullable at Insert
+
+Look at step 2: the row is inserted with `gateway_session_id = NULL`. The gateway transaction ID is only known after step 3 (the gateway call returns). There's a brief window where the row exists without a gateway link.
+
+Why not insert after the gateway call? Because if the gateway call succeeds but the insert fails (database error, Worker timeout), you've charged the customer but have no record of the checkout. The webhook will fire, find no session, and the order is lost.
+
+By inserting first, you guarantee that the record exists before money moves. The backfill in step 4 is a simple UPDATE. If it fails, you have a pending session without a gateway ID — recoverable by querying the gateway's API for recent sessions.
+
+The `UNIQUE` constraint on `gateway_session_id` allows NULLs (SQLite treats NULLs as distinct). Multiple sessions can be pending without a gateway ID. Once set, the ID is unique — no two sessions share a gateway transaction.
+
+## The Status Field: Idempotency Anchor
+
+```typescript
+status: text("status").notNull().default("pending"),
+```
+
+Values: `pending`, `completed`, `failed`.
+
+This is the idempotency mechanism. Webhooks fire multiple times. Stripe retries on timeout. PayPal sends both a synchronous capture response AND an async webhook. Without dedup, you'd create duplicate orders.
+
+The check is trivial:
+
+```typescript
+if (session.status === "completed") {
+  return null;  // already processed, no-op
+}
+```
+
+Why not dedup on the order table (check if an order with this `gateway_session_id` exists)? Because the session check is faster (single row lookup by unique index) and semantically clearer. The session is the unit of work. The order is the result. You check the unit of work, not the result.
+
+## Why Store Amounts?
+
+The session stores `subtotal_cents`, `shipping_cents`, `total_cents`. But the order also stores these. Isn't that redundant?
+
+Yes, and deliberately so. The session amounts are what was **presented to the gateway**. The order amounts are what was **confirmed by the gateway**. In the happy path, they're identical. In edge cases (currency conversion, gateway rounding), they might differ by a cent.
+
+Having both lets you reconcile: "we asked the gateway to charge $55.99, and it charged $55.99." If they diverge, you have an audit trail.
+
+More practically: the session amounts are computed at checkout time (before the gateway call). The order amounts come from the webhook payload (after payment). If the webhook payload is missing amounts (PayPal's webhook sometimes omits breakdown details), the session row is the fallback.
+
+## The Discount Context
+
+```typescript
+discountCodeId: text("discount_code_id").references(() => discountCodes.id),
+discountAmountCents: integer("discount_amount_cents").notNull().default(0),
+```
+
+The discount is resolved at checkout time and frozen in the session. Why not just store the code string and re-resolve at webhook time?
+
+Because the code might be deactivated between checkout and webhook. The customer entered a valid code, saw the discounted price, and paid. If the admin deactivates the code in that 30-second window, the webhook handler would reject the discount. The customer paid $47.50 but the system thinks they owe $50. Chaos.
+
+Freezing the discount in the session means: "at the moment of checkout, this discount was valid and this was the amount." The webhook handler trusts the session, not the current state of the discount code.
+
+## The Confirmation Flow Is Gateway-Agnostic
+
+This is the payoff. The `createOrderFromPayment` function doesn't know or care which gateway was used:
+
+```typescript
+async function createOrderFromPayment(db, event, gatewayName, request) {
+  const session = await getSessionByGatewayId(db, event.sessionId);
+  if (!session) return null;
+  if (session.status === "completed") return null;
+
+  // Everything below is identical for Stripe and PayPal
+  const cartItems = await getCartItems(db, session.cartId);
+  const order = await createOrder(db, session, cartItems, event);
+  await clearCart(db, session.cartId);
+  await markSessionCompleted(db, session.id);
+  return order.id;
+}
+```
+
+The gateway-specific code is isolated to two places:
+1. `createCheckout` — how to invoke the gateway.
+2. `verifyWebhook` / `captureOrder` — how to parse the gateway's response into a `WebhookEvent`.
+
+Everything between those two boundaries is shared. Adding a third gateway (Adyen, Square) means implementing one new class. The session table, the order creation logic, the cart clearing — all unchanged.
+
+## What This Table Replaces
+
+Before this table existed, the system carried context in Stripe's `metadata`:
+
+```typescript
+// Old approach (fragile)
+metadata: { cartId, userId, discountCodeId }
+```
+
+And the webhook handler parsed it:
+
+```typescript
+// Old approach (breaks with PayPal)
+const { cartId, userId } = session.metadata;
+```
+
+The session table replaces this with a database lookup. The cost is one extra row per checkout. The benefit is: gateway-agnostic confirmation, no metadata size limits, no stringly-typed parsing, and a permanent audit trail of every checkout attempt (including abandoned ones).
+
+## Abandoned Sessions
+
+A session with `status = 'pending'` and no corresponding order is an abandoned checkout. The customer started but didn't finish.
+
+These rows accumulate. They're useful for analytics (abandonment rate) and for debugging ("the customer says they paid but no order was created — let me check their session").
+
+We don't clean them up aggressively. They're small (~200 bytes each). A year of abandoned checkouts at indie scale is maybe 10,000 rows — 2MB. Not worth a cleanup cron.

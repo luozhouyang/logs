@@ -1,0 +1,218 @@
+---
+title: "Database Design: The Shipment Model and External Fulfillment Tracking"
+description: How to model shipments when fulfillment happens outside your system — tracking Amazon FBA orders, syncing carrier events, and knowing when to send the delivery email.
+sidebar:
+  order: 5
+---
+
+Your store takes the order. Your store takes the money. But your store doesn't ship the package. Amazon FBA does.
+
+This creates a modeling challenge: the shipment exists in someone else's system. You don't control when it ships, which carrier handles it, or when it arrives. You can only observe. The shipment table is a projection of an external reality, updated periodically by a sync job.
+
+This post covers how to model that observation — and why it's harder than it looks.
+
+## The Core Question: What Are You Actually Tracking?
+
+A shipment is not a package. A shipment is your system's knowledge of a package's journey. The distinction matters:
+
+- Amazon creates a fulfillment order. You don't see this immediately.
+- Amazon assigns a carrier and tracking number. You learn this on your next sync.
+- The carrier scans the package at each checkpoint. You learn this on your next sync.
+- The package is delivered. You learn this on your next sync.
+
+Every piece of shipment data is stale by definition. The sync job runs every 15 minutes. The package might have been delivered 14 minutes ago. Your system doesn't know yet.
+
+This means the shipment table is a cache of external state, not a source of truth. Design it accordingly.
+
+## The Schema
+
+```sql
+CREATE TABLE shipments (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id),
+  amazon_fulfillment_id TEXT NOT NULL,
+  carrier TEXT,
+  tracking_number TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  estimated_delivery_date INTEGER,
+  events_json TEXT,
+  synced_at INTEGER,
+  created_at INTEGER DEFAULT (unixepoch()),
+  updated_at INTEGER DEFAULT (unixepoch())
+);
+```
+
+Small table. Seven meaningful columns. Let's walk through why each exists.
+
+## The Amazon Link
+
+```typescript
+amazonFulfillmentId: text("amazon_fulfillment_id").notNull(),
+```
+
+When your system calls SP-API to create a fulfillment order, Amazon returns a fulfillment ID. This is the handle you use for all subsequent queries: "what's the status of fulfillment `amazon_fulfillment_id`?"
+
+It's `NOT NULL` because a shipment row is only created after the fulfillment request succeeds. If SP-API rejects the request, no shipment row exists — the order gets a `fulfillment_error` instead.
+
+Why not make this the primary key? Because Amazon's ID format could change, and because you might eventually support non-Amazon fulfillment (a third-party logistics provider). Your own `id` is stable.
+
+## Carrier and Tracking: Nullable Until Known
+
+```typescript
+carrier: text("carrier"),
+trackingNumber: text("tracking_number"),
+```
+
+Both are nullable. When the fulfillment order is first created, Amazon hasn't assigned a carrier yet. The package is sitting in a warehouse queue. Carrier and tracking number appear later, on a subsequent sync.
+
+The customer-facing order page shows "Processing" until these fields are populated, then switches to "Shipped" with the tracking number. The transition is driven by the sync job updating these fields.
+
+Why store carrier as a string instead of an enum? Because Amazon uses dozens of carriers (UPS, USPS, FedEx, DHL, regional carriers, Amazon Logistics). Maintaining an enum that tracks Amazon's carrier list is a losing battle. A string is always correct.
+
+## Status: Mirroring Amazon's State Machine
+
+```typescript
+status: text("status").notNull().default("pending"),
+```
+
+The status values mirror Amazon's fulfillment lifecycle:
+
+```
+pending → in_progress → shipped → delivered
+                ↓
+            cancelled
+```
+
+- `pending`: fulfillment order created, not yet picked up.
+- `in_progress`: package picked, packed, in transit to carrier.
+- `shipped`: handed to carrier, tracking number available.
+- `delivered`: confirmed delivery scan.
+- `cancelled`: Amazon couldn't fulfill (out of stock at FBA warehouse, restricted item).
+
+The critical transition is `shipped → delivered`. This is what triggers the "your order has been delivered" email. The sync job detects this transition and fires the notification.
+
+## The Events JSON: A Tracking History
+
+```typescript
+eventsJson: text("events_json"),
+```
+
+This stores the carrier's scan events as a JSON array:
+
+```json
+[
+  {
+    "timestamp": "2026-07-25T14:30:00Z",
+    "location": "Portland, OR",
+    "status": "Delivered",
+    "description": "Package delivered to front door"
+  },
+  {
+    "timestamp": "2026-07-25T08:15:00Z",
+    "location": "Portland, OR",
+    "status": "Out for delivery",
+    "description": "Package on vehicle for delivery"
+  },
+  {
+    "timestamp": "2026-07-24T22:00:00Z",
+    "location": "Sacramento, CA",
+    "status": "In transit",
+    "description": "Arrived at sorting facility"
+  }
+]
+```
+
+Why JSON instead of a `shipment_events` table?
+
+1. **Read pattern.** Events are always read as a complete list, ordered by time. They're never filtered individually ("show me all events in Portland"). A JSON array serves this perfectly.
+2. **Write pattern.** Events are replaced wholesale on each sync. SP-API returns the full event list. You overwrite `events_json` with the new array. A normalized table would require delete-all-then-insert-all, which is slower and more error-prone.
+3. **Volume.** A typical shipment has 5-15 events. That's ~2KB of JSON. Not worth the join cost of a separate table.
+
+The events are displayed on the order tracking page. The customer sees the full journey. No separate "tracking" microservice needed.
+
+## Estimated Delivery: The Promise
+
+```typescript
+estimatedDeliveryDate: integer("estimated_delivery_date", { mode: "timestamp" }),
+```
+
+Amazon provides an estimated delivery window when the fulfillment order is created. This is what the "shipped" email shows: "Estimated delivery: July 28, 2026."
+
+It's nullable because it's not always available. Some carriers don't provide estimates. Some international shipments have uncertain timelines.
+
+Why store it if it's just an estimate? Because the customer needs a reference point. "Your package will arrive around July 28" is infinitely better than "your package will arrive eventually." Even if it's wrong by a day, it sets expectations.
+
+## The Sync Timestamp
+
+```typescript
+syncedAt: integer("synced_at", { mode: "timestamp" }),
+```
+
+When was this row last updated from SP-API? This serves the same purpose as `synced_at` on the products table:
+
+1. The sync job queries "shipments not synced in the last 15 minutes" to find work.
+2. The admin panel shows "last updated 5 minutes ago" for freshness.
+3. If a shipment is stuck in `shipped` for days, the `synced_at` tells you whether the sync job is even running.
+
+## The Sync Loop
+
+The shipment table is fed by a periodic sync job:
+
+```
+Every 15 minutes:
+  1. SELECT shipments WHERE status NOT IN ('delivered', 'cancelled')
+  2. For each, call SP-API getFulfillmentOrder(amazon_fulfillment_id)
+  3. Compare returned status/events with stored values
+  4. If changed:
+     a. UPDATE shipment row
+     b. If new status = 'shipped': send shipped email
+     c. If new status = 'delivered': send delivered email, update order status
+     d. If new status = 'cancelled': send failed email, update order status
+  5. UPDATE synced_at = now
+```
+
+The sync job is the only writer to the shipment table (besides the initial creation at fulfillment time). No customer action, no admin action modifies shipment data directly. It's a read-only projection updated by a single writer.
+
+## One Shipment Per Order (Usually)
+
+The schema allows multiple shipments per order (no UNIQUE on `order_id`). Why?
+
+Because Amazon can split a fulfillment order into multiple packages. If a customer orders three items and one is in a different warehouse, Amazon ships two packages. Each gets its own tracking number.
+
+In practice, this is rare at indie scale. But the schema supports it without modification. The order page shows all shipments for the order, each with its own tracking info.
+
+## The Order Status Connection
+
+The shipment status drives the order status:
+
+```typescript
+// In the sync job:
+if (newShipmentStatus === "shipped") {
+  await db.update(orders)
+    .set({ status: "shipped" })
+    .where(eq(orders.id, shipment.orderId));
+}
+
+if (newShipmentStatus === "delivered") {
+  await db.update(orders)
+    .set({ status: "delivered" })
+    .where(eq(orders.id, shipment.orderId));
+}
+```
+
+The order status is derived from shipment status. The order doesn't independently transition to "shipped" — it waits for the shipment to tell it. This keeps the two tables consistent. The shipment is the authority on physical reality; the order reflects it.
+
+## What This Model Doesn't Do
+
+- **No real-time tracking.** The sync job runs every 15 minutes. The customer doesn't see live GPS updates. At indie scale, 15-minute staleness is acceptable. Real-time tracking requires webhooks from carriers, which is a different system.
+- **No return/refund modeling.** Returns are handled through Amazon's system. The storefront doesn't manage return logistics. If needed, a `returns` table would reference the shipment.
+- **No multi-carrier rate shopping.** We don't compare UPS vs FedEx prices. Amazon FBA chooses the carrier. We just observe.
+- **No signature confirmation.** Some carriers offer signature-on-delivery. We don't track it. If the customer disputes delivery, that's a support conversation, not a data model problem.
+
+## The Design Principle
+
+The shipment table embodies a key principle for integrations with external systems: **model what you observe, not what you control.**
+
+You don't control when Amazon ships. You don't control which carrier they use. You don't control when the package arrives. You can only poll, compare, and update. The schema reflects this: nullable fields for data that arrives late, a sync timestamp for freshness, and a JSON blob for data that changes shape.
+
+Fighting the external system's data model leads to brittle code. Accepting it and building a clean projection on top leads to a system that degrades gracefully when the external API is slow, changes, or goes down.
