@@ -4,8 +4,11 @@ import { Button } from "./ui/button";
 import { LinkButton } from "./ui/link-button";
 import { ThemeToggle } from "./ui/theme-toggle";
 import { SearchTrigger } from "./ui/search";
+import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
+import { Badge } from "./ui/badge";
 import { config } from "virtual:nimbus/config";
 import { getSidebarSections } from "@cloudflare/nimbus-docs";
+import { getCategories, getTags } from "../lib/taxonomy";
 
 interface Props {
   /** Astro collection id for the current page, forwarded from DocsLayout. */
@@ -29,6 +32,9 @@ const { collection, showSidebar = true } = Astro.props;
 const currentSlug = Astro.url.pathname.replace(/\/$/, "") || "/";
 const sections = await getSidebarSections(currentSlug, { collection });
 const showSections = sections.length >= 2;
+
+const categories = await getCategories();
+const tags = await getTags();
 ---
 
 <header class="sticky top-0 z-30 border-b border-border bg-card/80 backdrop-blur-lg">
@@ -61,6 +67,67 @@ const showSections = sections.length >= 2;
     </div>
 
     <div class="flex items-center gap-2">
+      <nav aria-label="Browse" class="hidden md:flex items-center gap-1">
+        <Popover>
+          <PopoverTrigger
+            class="flex items-center gap-1 px-2 py-1 rounded-md text-[0.8125rem] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+          >
+            Categories
+            <Icon name="ph:caret-down" class="w-3 h-3" />
+          </PopoverTrigger>
+          <PopoverContent placement="bottom-end" class="w-56">
+            <div class="flex flex-col gap-0.5">
+              {categories.map((cat) => (
+                <a
+                  href={`/categories/${cat.slug}/`}
+                  class="flex items-center justify-between px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 no-underline transition-colors"
+                >
+                  {cat.label}
+                  <span class="text-xs text-muted-foreground/60">{cat.count}</span>
+                </a>
+              ))}
+            </div>
+            <div class="mt-1.5 border-t border-border pt-1.5">
+              <a
+                href="/categories/"
+                class="block px-2 py-1.5 rounded-md text-sm font-medium text-primary hover:bg-accent/60 no-underline transition-colors"
+              >
+                All categories &rarr;
+              </a>
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        <Popover>
+          <PopoverTrigger
+            class="flex items-center gap-1 px-2 py-1 rounded-md text-[0.8125rem] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+          >
+            Tags
+            <Icon name="ph:caret-down" class="w-3 h-3" />
+          </PopoverTrigger>
+          <PopoverContent placement="bottom-end" class="w-64">
+            <div class="flex flex-wrap gap-1.5 p-1">
+              {tags.map((tag) => (
+                <a href={`/tags/${tag.slug}/`} class="no-underline">
+                  <Badge size="small" class="cursor-pointer hover:opacity-80 transition-opacity">
+                    {tag.label}
+                    <span class="ml-1 opacity-60">{tag.count}</span>
+                  </Badge>
+                </a>
+              ))}
+            </div>
+            <div class="mt-1.5 border-t border-border pt-1.5">
+              <a
+                href="/tags/"
+                class="block px-2 py-1.5 rounded-md text-sm font-medium text-primary hover:bg-accent/60 no-underline transition-colors"
+              >
+                All tags &rarr;
+              </a>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </nav>
+
       {config.search !== false && <SearchTrigger />}
       {config.github && (
         <LinkButton
