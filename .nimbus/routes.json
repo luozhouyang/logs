@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "base": "/",
+  "knownRoutes": [
+    "/",
+    "/404",
+    "/cloudflare/r2-image-hosting",
+    "/cloudflare/wrangler-tips",
+    "/kong/docker-deploy",
+    "/kong/introduction"
+  ],
+  "opaqueNamespaces": []
+}

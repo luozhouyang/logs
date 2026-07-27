@@ -1,0 +1,48 @@
+---
+title: Image Hosting with Cloudflare R2
+description: Build an image hosting platform with Cloudflare R2's S3-compatible storage.
+sidebar:
+  order: 0
+---
+
+Cloudflare R2 is an S3-compatible cloud storage service that allows users to
+store arbitrary objects and access them via HTTP APIs. With R2, we can build
+an image hosting platform for storing and sharing images.
+
+## Features
+
+- Store unlimited objects
+- S3 API compatible
+- **Zero egress fees**
+- Free 10GB storage tier
+
+## Steps
+
+1. Register a Cloudflare account
+2. Create an R2 bucket
+3. Configure access permissions
+4. Upload images
+5. Get image URLs
+
+## Plan Comparison
+
+| Feature | Free Tier | Paid Tier |
+| --- | --- | --- |
+| Storage | 10GB | Unlimited |
+| Egress | Free | Free |
+| Requests | 100K/day | Unlimited |
+
+## Sample Code
+
+```typescript
+import { S3Client } from "@aws-sdk/client-s3";
+
+const s3 = new S3Client({
+  region: "auto",
+  endpoint: "https://<account-id>.r2.cloudflarestorage.com",
+  credentials: {
+    accessKeyId: "<access-key-id>",
+    secretAccessKey: "<secret-access-key>",
+  },
+});
+```

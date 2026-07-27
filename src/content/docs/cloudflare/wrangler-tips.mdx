@@ -1,0 +1,277 @@
+---
+title: Wrangler Usage Tips
+description: Tips and tricks for working with Cloudflare Wrangler CLI.
+sidebar:
+  order: 1
+---
+
+`wrangler` is Cloudflare's official CLI tool for managing Cloudflare Workers.
+
+## Creating a Local D1 Database
+
+After configuring `d1_databases` in `wrangler.toml` or `wrangler.jsonc`, you
+may want to create a local SQLite database to simulate D1.
+
+```toml
+d1_databases = [
+  { binding = "DB", database_name = "my_db", database_id = "1234567890" }
+]
+```
+
+By default, wrangler doesn't create this local database immediately. To create it:
+
+1. Run `npx wrangler dev`
+2. Execute a SQL query, e.g., `npx wrangler d1 execute my_db --local --command='SELECT * FROM my_table'`
+
+Then you'll see the SQLite database created under `.wrangler/state/v3/d1/`:
+
+```bash
+.wrangler
+├── state
+│   └── v3
+│       ├── cache
+│       │   └── miniflare-CacheObject
+│       ├── d1
+│       │   └── miniflare-D1DatabaseObject
+│       │       ├── 14c8722131cce17d31bc37d958e4eacf978b0d4d2c28dea6784e37418eeb3643.sqlite
+│       │       ├── 14c8722131cce17d31bc37d958e4eacf978b0d4d2c28dea6784e37418eeb3643.sqlite-shm
+│       │       └── 14c8722131cce17d31bc37d958e4eacf978b0d4d2c28dea6784e37418eeb3643.sqlite-wal
+│       └── workflows
+└── tmp
+```
+
+You can then configure a `drizzle-dev.config.ts` pointing to this local SQLite
+database for local CRUD operations.
+
+## D1 + Drizzle ORM Setup (The Wrong Way)
+
+Drizzle ORM can provide a config file per environment. Typically you'd configure
+**development** and **production** environments.
+
+Example `drizzle-dev.config.ts`:
+
+```typescript
+import { defineConfig } from "drizzle-kit";
+import fs from "fs";
+import path from "path";
+
+function resolveDbPath() {
+  const dir = path.resolve(".wrangler/state/v3/d1/miniflare-D1DatabaseObject");
+  try {
+    const files = fs.readdirSync(dir);
+    const sqliteFile = files.find((file) => file.endsWith(".sqlite"));
+    if (!sqliteFile) {
+      throw new Error(`No .sqlite file found in ${dir}`);
+    }
+    return path.join(dir, sqliteFile);
+  } catch (err) {
+    console.error("Error resolving database path:", err);
+    throw new Error(
+      "Could not resolve the local D1 database path. Please ensure you have manually created the local db correctly."
+    );
+  }
+}
+
+export default defineConfig({
+  schema: "./src/db/schemas/*",
+  out: "drizzle/migrations",
+  dialect: "sqlite",
+  dbCredentials: {
+    url: resolveDbPath(),
+  },
+});
+```
+
+Generate migrations:
+
+```bash
+npx drizzle-kit generate --config drizzle-dev.config.ts --name='update_tables'
+```
+
+Add a convenience script to `package.json`:
+
+```json
+"scripts": {
+  "db:generate": "drizzle-kit generate --config drizzle-dev.config.ts"
+}
+```
+
+Usage:
+
+```bash
+npm run db:generate -- --name='init_tables'
+```
+
+## D1 + Drizzle ORM Setup (The Right Way)
+
+The `drizzle.config.ts` file isn't strictly required — especially at **runtime**,
+it's not needed.
+
+For Cloudflare Workers projects, the main purpose of `drizzle.config.ts` locally
+is generating `migrations` files. To apply migrations to D1, use `wrangler`.
+
+<Steps>
+  <Step title="Create drizzle.config.ts">
+
+```typescript
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  dialect: "sqlite",
+  schema: "./src/db/schemas",
+  driver: "d1-http",
+  out: "./drizzle/migrations",
+  dbCredentials: {
+    accountId: process.env.CF_ACCOUNT_ID!,
+    databaseId: process.env.CF_DATABASE_ID!,
+    token: process.env.CF_ACCESS_TOKEN!,
+  },
+});
+```
+
+The `dbCredentials` params can be empty in `.env.local` — drizzle won't actually
+use them since runtime code doesn't read `drizzle.config.ts`.
+
+  </Step>
+  <Step title="Generate migrations">
+
+```bash
+npx drizzle-kit generate --name=your_message
+```
+
+  </Step>
+  <Step title="Apply migrations locally">
+
+```bash
+npx wrangler d1 apply $your_database_name --local
+```
+
+This applies migrations to the SQLite database under `.wrangler/state/v3/d1/`.
+
+  </Step>
+  <Step title="Connect at runtime">
+
+```typescript
+import { drizzle } from "drizzle-orm/d1";
+import { Database } from "../types";
+import * as schemas from "./schemas";
+
+export function getDatabase(db: D1Database): Database {
+  return drizzle(db, { schema: schemas });
+}
+```
+
+Just provide the `D1Database` object — this is the D1 Binding declared in your
+Workers `env`. Configuration:
+
+```json
+{
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xxxxx",
+      "database_id": "xxxxx",
+      "migrations_dir": "drizzle/migrations"
+    }
+  ]
+}
+```
+
+  </Step>
+</Steps>
+
+After running `npx wrangler typegen`, you'll find the `Env` definition in
+`worker-configuration.d.ts`:
+
+```typescript
+declare namespace Cloudflare {
+  interface Env {
+    CF_ACCOUNT_ID: string;
+    CF_DATABASE_ID: string;
+    CF_ACCESS_TOKEN: string;
+    DB: D1Database;
+  }
+}
+interface CloudflareBindings extends Cloudflare.Env {}
+```
+
+## Service Binding Dispose Pattern
+
+Wrangler 4.x supports implicit dispose via the `using` keyword. However, you may
+encounter errors like `Object cannot be disposed`.
+
+Check your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2017"
+  }
+}
+```
+
+With this target, one approach is **explicit dispose calls**:
+
+```typescript
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+
+export async function runRpcUserService<T>(
+  callback: (userService: IUserService) => Promise<T>
+) {
+  const { env } = getCloudflareContext();
+  // @ts-expect-error: ignore type error
+  const userService = await env.PICKNAMES_CORE.getUserService();
+  try {
+    return await callback(userService);
+  } finally {
+    userService[Symbol.dispose];
+  }
+}
+```
+
+<Aside variant="warning">
+This causes build errors: `Expected an assignment or function call and instead
+saw an expression.` Changing to `userService[Symbol.dispose]()` fixes the build
+but causes runtime errors: `TypeError: r[Symbol.dispose] is not a function`.
+</Aside>
+
+The issue is the `as IUserService` type cast — these interfaces aren't
+`Disposable`, causing dispose-related errors.
+
+Per Cloudflare docs on
+[RpcTarget](https://developers.cloudflare.com/durable-objects/examples/reference-do-name-using-init/),
+the correct pattern is:
+
+```typescript
+export async function runRpcUserService<T>(
+  callback: (userService: IUserService) => Promise<T>
+) {
+  const { env } = getCloudflareContext();
+  // @ts-expect-error: ignore type error
+  const userService = await env.PICKNAMES_CORE.getUserService();
+  try {
+    return await callback(userService);
+  } finally {
+    (await userService)[Symbol.dispose]?.();
+  }
+}
+
+export async function runRpcChannelService<T>(
+  callback: (channelService: IChannelService) => Promise<T>
+) {
+  const { env } = getCloudflareContext();
+  // @ts-expect-error: ignore type error
+  const channelService = await env.PICKNAMES_CORE.getChannelService();
+  try {
+    return await callback(channelService);
+  } catch (e) {
+    console.error(e);
+  } finally {
+    (await channelService)[Symbol.dispose]?.();
+  }
+}
+```
+
+This approach:
+- Removes type cast issues
+- Though RPC returns `any`, the `callback` parameter provides concrete types for callers

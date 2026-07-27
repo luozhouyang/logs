@@ -1,176 +1,39 @@
 ---
-import { getCollection } from "astro:content";
-import BaseHead from "../components/BaseHead.astro";
-import Footer from "../components/Footer.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
 import Header from "../components/Header.astro";
-import Badge from "../components/ui/Badge.astro";
-
-import FormattedDate from "../components/FormattedDate.astro";
-import Pagination from "../components/Pagination.astro";
-import TagsSidebar from "../components/TagsSidebar.astro";
-import { SITE_DESCRIPTION, SITE_TITLE } from "../consts";
-
-const POSTS_PER_PAGE = 10;
-
-const allPosts = (await getCollection("blog")).sort(
-  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf()
-);
-
-// Pagination logic
-const totalPages = Math.ceil(allPosts.length / POSTS_PER_PAGE);
-const currentPage = 1;
-const posts = allPosts.slice(0, POSTS_PER_PAGE);
-
-// Get all unique tags
-const allTags = [
-  ...new Set(allPosts.flatMap((post) => post.data.tags || [])),
-].sort();
-
-// Count posts per tag
-const tagCounts: Record<string, number> = allTags.reduce(
-  (acc: Record<string, number>, tag: string) => {
-    const count = allPosts.filter((post) =>
-      post.data.tags?.includes(tag)
-    ).length;
-    acc[tag] = count;
-    return acc;
-  },
-  {}
-);
+import { config } from "virtual:nimbus/config";
 ---
 
-<!doctype html>
-<html lang="en" class="light">
-  <head>
-    <BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
-    <script is:inline>
-      // 在页面加载前检查主题设置
-      const savedTheme = localStorage.getItem('theme');
-      if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        document.documentElement.classList.add('dark');
-        document.documentElement.classList.remove('light');
-      } else {
-        document.documentElement.classList.add('light');
-        document.documentElement.classList.remove('dark');
-      }
-    </script>
-  </head>
-  <body class="min-h-screen bg-background font-sans antialiased flex flex-col">
+<BaseLayout title={config.title} description={config.description}>
+  <div class="flex flex-col min-h-screen">
     <Header />
-    <div class="container py-8 flex-1">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
-        {
-          allTags.length > 0 && (
-            <aside class="md:col-span-1">
-              <TagsSidebar
-                allTags={allTags}
-                tagCounts={tagCounts}
-                allPostsCount={allPosts.length}
-              />
-            </aside>
-          )
-        }
-        <main class="md:col-span-3 space-y-6">
-        <div class="space-y-8">
-          <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold mb-4">Blog</h1>
-            <p class="text-lg text-muted-foreground">
-              Welcome to my blog! Here you'll find articles about web
-              development, technology, and other topics I'm passionate about.
-            </p>
-          </div>
+    <main class="flex-1 mx-auto max-w-2xl w-full px-6 py-24">
+      <h1
+        class="text-foreground leading-tight"
+        style="font-size: var(--nb-h1-size); font-weight: var(--nb-h1-weight); letter-spacing: var(--nb-h1-tracking);"
+      >
+        {config.title}
+      </h1>
+      <p class="mt-2 text-[1.0625rem] text-muted-foreground leading-relaxed">
+        {config.description}
+      </p>
 
-          <div class="space-y-6">
-            {
-              posts.map((post) => (
-                <article 
-                  class="border-b border-border pb-6 last:border-b-0 blog-post" 
-                  data-tags={post.data.tags ? post.data.tags.join(',') : ''}
-                >
-                  <a href={`/blog/${post.id}/`} class="block group">
-                    <h2 class="text-2xl font-semibold mb-2 group-hover:text-primary transition-colors dark:text-white dark:group-hover:text-accent-dark">
-                      {post.data.title}
-                    </h2>
-                    <div class="text-sm text-muted-foreground mb-3 dark:text-white/95">
-                      <FormattedDate date={post.data.pubDate} />
-                    </div>
-                    <p class="text-muted-foreground mb-4 leading-relaxed dark:text-white/95">
-                      {post.data.description}
-                    </p>
-                    {post.data.tags && post.data.tags.length > 0 && (
-                      <div class="flex flex-wrap gap-2">
-                        {post.data.tags.map((tag) => (
-                          <Badge variant="outline" size="sm">
-                            <button
-                              class="badge-tag hover:bg-primary hover:text-primary-foreground transition-colors tag-filter-btn"
-                              data-tag={tag}
-                            >
-                              {tag}
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </a>
-                </article>
-              ))
-            }
-          </div>
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            baseUrl="/"
-          />
-        </div>
-        </main>
+      <div class="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <a
+          href="/kong/introduction"
+          class="block rounded-lg border border-border p-4 transition-colors hover:border-border-strong no-underline"
+        >
+          <div class="font-medium text-foreground">Kong Gateway</div>
+          <div class="mt-0.5 text-sm text-muted-foreground">API Gateway deployment & security</div>
+        </a>
+        <a
+          href="/cloudflare/r2-image-hosting"
+          class="block rounded-lg border border-border p-4 transition-colors hover:border-border-strong no-underline"
+        >
+          <div class="font-medium text-foreground">Cloudflare</div>
+          <div class="mt-0.5 text-sm text-muted-foreground">R2, Workers & Wrangler tips</div>
+        </a>
       </div>
-    </div>
-    <Footer />
-    
-    <style>
-      .tag-filter-btn.active {
-        background-color: hsl(var(--primary));
-        color: hsl(var(--primary-foreground));
-      }
-    </style>
-    
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const tagButtons = document.querySelectorAll('.tag-filter-btn') as NodeListOf<HTMLElement>;
-        const blogPosts = document.querySelectorAll('.blog-post') as NodeListOf<HTMLElement>;
-        
-        function filterPosts(selectedTag: string): void {
-          // Update active button state
-          tagButtons.forEach(btn => {
-            btn.classList.remove('active');
-            if (btn.dataset.tag === selectedTag) {
-              btn.classList.add('active');
-            }
-          });
-          
-          // Filter posts
-          blogPosts.forEach(post => {
-            const postTags = post.dataset.tags ? post.dataset.tags.split(',') : [];
-            
-            if (selectedTag === 'all' || postTags.includes(selectedTag)) {
-              post.style.display = 'block';
-            } else {
-              post.style.display = 'none';
-            }
-          });
-        }
-        
-        // Add click event listeners to all tag buttons
-        tagButtons.forEach(button => {
-          button.addEventListener('click', function(e: Event) {
-            e.preventDefault();
-            const selectedTag = (this as HTMLElement).dataset.tag;
-            if (selectedTag) {
-              filterPosts(selectedTag);
-            }
-          });
-        });
-      });
-    </script>
-  </body>
-</html>
+    </main>
+  </div>
+</BaseLayout>
