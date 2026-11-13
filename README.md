@@ -1,68 +1,66 @@
-# Astro Starter Kit: Blog
+# luozhouyang's log
+
+A personal blog about Cloudflare, Kong Gateway, Docker, and self-hosting. It is
+built on [Cloudflare Nimbus](https://nimbus-docs.com) — the Astro-based docs
+framework — with Pagefind search and static hosting on Cloudflare Workers.
+
+## Content
+
+Posts live in `src/content/docs/<section>/<slug>.mdx`. The section directory is
+the post's category (`/kong/introduction/` → category `kong`), and frontmatter
+`tags` drive `/tags/<tag>/` pages.
+
+```mdx
+---
+title: 在Docker部署Kong Gateway
+description: 在Docker上部署Kong Gateway并且提供安全的Kong Manager UI访问
+date: 2025-11-20          # first published (carried over from the old blog)
+lastUpdated: 2025-11-20   # optional; falls back to git history
+lang: zh-CN               # optional; defaults to the site locale (en)
+tags: [kong, docker]
+sidebar:
+  order: 1                # order within the section
+---
+```
+
+Only `title` is required. Component and authoring rules are documented in
+[AGENT.md](AGENT.md).
+
+## Commands
+
+| Command | Action |
+| :-- | :-- |
+| `npm install` | Install dependencies |
+| `npm run dev` | Dev server at `localhost:4321` |
+| `npm run build` | Build to `dist/` (includes `astro check`, MDX validation, Pagefind) |
+| `npm run preview` | Serve `dist/` locally |
+| `npm run lint:docs` | Lint content (`nimbus-docs lint`), `--fix` to autofix |
+| `npm run typecheck` | `astro check` |
+| `npm run test:e2e` | Playwright suite against the production build (port 4327) |
+| `npm run deploy` | Check, build, and `wrangler deploy` |
+
+## URLs and redirects
+
+Posts used to live at `/blog/<slug>/`. Those paths are kept alive in the
+`redirects` map in `astro.config.ts` — add an entry there whenever a post moves,
+so old links (feeds, search results, other people's bookmarks) keep working.
+
+The feed is at `/rss.xml`, the sitemap at `/sitemap-index.xml`, and
+`/llms.txt` indexes the site for agents.
+
+## Search
+
+Search is Pagefind, configured by `pagefind.yml`. The blog is bilingual, and
+Pagefind would otherwise build one index per language and only query the one
+matching the current page — making Chinese posts invisible from English pages.
+`pagefind.yml` forces a single Chinese index so every post is findable from
+anywhere; English queries still work, without stemming.
+
+## Deployment
+
+`wrangler.jsonc` serves `dist/` as static assets on Cloudflare Workers with a
+custom 404 page:
 
 ```sh
-npm create astro@latest -- --template blog
+npm run deploy
 ```
-
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/astro/tree/latest/examples/blog)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/astro/tree/latest/examples/blog)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/withastro/astro?devcontainer_path=.devcontainer/blog/devcontainer.json)
-
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-![blog](https://github.com/withastro/astro/assets/2244813/ff10799f-a816-4703-b967-c78997e8323d)
-
-Features:
-
-- ✅ Minimal styling (make it your own!)
-- ✅ 100/100 Lighthouse performance
-- ✅ SEO-friendly with canonical URLs and OpenGraph data
-- ✅ Sitemap support
-- ✅ RSS Feed support
-- ✅ Markdown & MDX support
-
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-├── public/
-├── src/
-│   ├── components/
-│   ├── content/
-│   ├── layouts/
-│   └── pages/
-├── astro.config.mjs
-├── README.md
-├── package.json
-└── tsconfig.json
-```
-
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
-
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
-
-The `src/content/` directory contains "collections" of related Markdown and MDX documents. Use `getCollection()` to retrieve posts from `src/content/blog/`, and type-check your frontmatter using an optional schema. See [Astro's Content Collections docs](https://docs.astro.build/en/guides/content-collections/) to learn more.
-
-Any static assets, like images, can be placed in the `public/` directory.
-
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
-
-## Credit
-
-This theme is based off of the lovely [Bear Blog](https://github.com/HermanMartinus/bearblog/).

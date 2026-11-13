@@ -20,6 +20,7 @@
     "test:e2e:install": "PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright playwright install chromium"
   },
   "dependencies": {
+    "@astrojs/rss": "^4.0.19",
     "@cloudflare/nimbus-docs": "^0.8.1",
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",

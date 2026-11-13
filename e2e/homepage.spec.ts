@@ -9,20 +9,22 @@ test.describe("Homepage", () => {
 
   test("displays topic cards with correct links", async ({ page }) => {
     await page.goto("/");
-    const kongCard = page.locator('a[href="/kong/introduction"]');
-    const cfCard = page.locator('a[href="/cloudflare/r2-image-hosting"]');
+    // Scope to <main>: the header's Categories popover links to the same URLs.
+    const kongCard = page.locator('main a[href="/categories/kong/"]');
+    const cfCard = page.locator('main a[href="/categories/cloudflare/"]');
 
     await expect(kongCard).toBeVisible();
-    await expect(kongCard).toContainText("Kong Gateway");
+    await expect(kongCard).toContainText("Kong");
     await expect(cfCard).toBeVisible();
     await expect(cfCard).toContainText("Cloudflare");
   });
 
   test("topic cards navigate correctly", async ({ page }) => {
     await page.goto("/");
-    await page.locator('a[href="/kong/introduction"]').click();
-    await expect(page).toHaveURL(/\/kong\/introduction/);
-    await expect(page.locator("h1")).toContainText("Kong Gateway Introduction");
+    await page.locator('main a[href="/categories/kong/"]').click();
+    await expect(page).toHaveURL(/\/categories\/kong\/?$/);
+    await expect(page.locator("h1")).toContainText("Kong");
+    await expect(page.locator('main a[href="/kong/introduction"]').first()).toBeVisible();
   });
 
   test("header shows site title and links back home", async ({ page }) => {

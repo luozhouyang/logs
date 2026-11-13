@@ -10,6 +10,14 @@ export const collections = {
       schemaFields: {
         audience: z.literal("human").optional(),
         tags: z.array(z.string()).optional(),
+        // Publication date, carried over from the pre-Nimbus blog (`pubDate`).
+        // Nimbus models `lastUpdated` natively; `date` is the authored "first
+        // published" date and is shown ahead of it on the page.
+        date: z.coerce.date().optional(),
+        // Content language for pages that aren't in the site locale (posts are
+        // written in Chinese and English). Drives <html lang> and search
+        // segmentation.
+        lang: z.string().optional(),
       },
     }),
   ),

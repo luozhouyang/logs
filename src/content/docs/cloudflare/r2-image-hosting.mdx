@@ -1,49 +1,47 @@
 ---
-title: Image Hosting with Cloudflare R2
-description: Build an image hosting platform with Cloudflare R2's S3-compatible storage.
-tags: [cloudflare, r2, storage, s3]
+title: "利用Cloudflare R2构建图床"
+description: "A guide to building an image hosting platform with Cloudflare R2"
+date: 2025-07-31
+lang: zh-CN
+lastUpdated: 2025-07-31
+tags: [cloudflare, r2]
 sidebar:
   order: 0
 ---
+Cloudflare R2是一个基于Amazon S3 API的云存储服务，它允许用户存储任意数量的对象，并使用HTTP API进行访问。利用Cloudflare R2，我们可以构建一个图床，用于存储和分享图片。
 
-Cloudflare R2 is an S3-compatible cloud storage service that allows users to
-store arbitrary objects and access them via HTTP APIs. With R2, we can build
-an image hosting platform for storing and sharing images.
+## Cloudflare R2的特点
 
-## Features
+- [x] 存储任意数量的对象
+- [x] S3 API兼容
+- [x] 出网流量不收费
+- [x] 免费10G存储
 
-- Store unlimited objects
-- S3 API compatible
-- **Zero egress fees**
-- Free 10GB storage tier
+## 使用步骤
 
-## Steps
+1. 注册Cloudflare账号
+2. 创建R2存储桶
+3. 配置访问权限
+4. 上传图片
+5. 获取图片链接
 
-1. Register a Cloudflare account
-2. Create an R2 bucket
-3. Configure access permissions
-4. Upload images
-5. Get image URLs
+## 套餐对比
 
-## Plan Comparison
-
-| Feature | Free Tier | Paid Tier |
+| 功能 | 免费套餐 | 付费套餐 |
 | --- | --- | --- |
-| Storage | 10GB | Unlimited |
-| Egress | Free | Free |
-| Requests | 100K/day | Unlimited |
+| 存储空间 | 10GB | 无限制 |
+| 出网流量 | 免费 | 免费 |
+| 请求数 | 每天10万次 | 无限制 |
 
-## Sample Code
+## 参考代码
 
 ```typescript
-import { S3Client } from "@aws-sdk/client-s3";
-
 const s3 = new S3Client({
-  region: "auto",
-  endpoint: "https://<account-id>.r2.cloudflarestorage.com",
+  region: 'auto',
+  endpoint: 'https://r2.cloudflare.com',
   credentials: {
-    accessKeyId: "<access-key-id>",
-    secretAccessKey: "<secret-access-key>",
+    accessKeyId: 'accessKeyId',
+    secretAccessKey: 'secretAccessKey',
   },
-});
+})
 ```

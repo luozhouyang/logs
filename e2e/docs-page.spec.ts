@@ -3,9 +3,9 @@ import { test, expect } from "@playwright/test";
 test.describe("Docs pages", () => {
   test("renders doc page with title, description, and content", async ({ page }) => {
     await page.goto("/kong/introduction");
-    await expect(page.locator("h1")).toContainText("Kong Gateway Introduction");
+    await expect(page.locator("h1")).toContainText("Kong Gateway介绍");
     await expect(page.locator("article.docs-content")).toBeVisible();
-    await expect(page.locator("article")).toContainText("cloud-native API Gateway");
+    await expect(page.locator("article")).toContainText("云原生的API Gateway");
   });
 
   test("shows breadcrumbs", async ({ page }) => {
@@ -20,8 +20,8 @@ test.describe("Docs pages", () => {
     await page.goto("/kong/introduction");
     const sidebar = page.locator("#desktop-sidebar");
     await expect(sidebar).toBeVisible();
-    await expect(sidebar).toContainText("Kong Gateway Introduction");
-    await expect(sidebar).toContainText("Deploy Kong Gateway with Docker");
+    await expect(sidebar).toContainText("Kong Gateway介绍");
+    await expect(sidebar).toContainText("在Docker部署Kong Gateway");
   });
 
   test("sidebar highlights active page", async ({ page, isMobile }) => {
@@ -29,7 +29,7 @@ test.describe("Docs pages", () => {
     await page.goto("/kong/introduction");
     const activeLink = page.locator("#desktop-sidebar a[aria-current='page']");
     await expect(activeLink).toBeVisible();
-    await expect(activeLink).toContainText("Kong Gateway Introduction");
+    await expect(activeLink).toContainText("Kong Gateway介绍");
   });
 
   test("shows table of contents on desktop", async ({ page, isMobile }) => {
@@ -60,6 +60,16 @@ test.describe("Docs pages", () => {
     const img = page.locator("article img").first();
     await expect(img).toBeVisible();
     await expect(img).toHaveAttribute("src", /\/images\//);
+  });
+
+  test("shows the authored publication date", async ({ page }) => {
+    await page.goto("/kong/introduction");
+    const actions = page.locator("[data-nb-page-actions]");
+    await expect(actions).toContainText("Published");
+    await expect(actions.locator("time").first()).toHaveAttribute(
+      "datetime",
+      /^2025-07-29/,
+    );
   });
 
   test("page actions show markdown link", async ({ page }) => {

@@ -1,0 +1,14 @@
+# Pagefind reads this file when the build runs `pagefind --site dist`.
+#
+# Why force a single language: this blog is bilingual. Pagefind builds one
+# index per detected language and the search UI only queries the index for
+# the current page's <html lang>, so a reader on an English page could never
+# find a Chinese post (searching "Kong" on the homepage returned nothing even
+# though two Kong posts exist). Forcing one index keeps every post findable
+# from every page.
+#
+# "zh" rather than "en" because Chinese posts are the original content and
+# Chinese queries need word segmentation to match at all; English words are
+# still indexed as whole words, so English queries keep working. The cost is
+# English stemming ("deploying" no longer matches "deploy").
+force_language: zh

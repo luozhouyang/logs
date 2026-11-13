@@ -4,9 +4,9 @@ test.describe("Navigation", () => {
   test("sidebar navigates between pages", async ({ page, isMobile }) => {
     test.skip(isMobile, "Sidebar is hidden on mobile");
     await page.goto("/kong/introduction");
-    await page.locator("#desktop-sidebar a", { hasText: "Deploy Kong Gateway with Docker" }).click();
+    await page.locator("#desktop-sidebar a", { hasText: "在Docker部署Kong Gateway" }).click();
     await expect(page).toHaveURL(/\/kong\/docker-deploy/);
-    await expect(page.locator("h1")).toContainText("Deploy Kong Gateway with Docker");
+    await expect(page.locator("h1")).toContainText("在Docker部署Kong Gateway");
   });
 
   test("mobile menu opens and closes sidebar", async ({ page, isMobile }) => {
@@ -30,7 +30,7 @@ test.describe("Navigation", () => {
     test.skip(!isMobile, "Mobile menu only on mobile");
     await page.goto("/kong/introduction");
     await page.locator("[data-menu-btn]").click();
-    await page.locator("dialog a", { hasText: "Deploy Kong Gateway with Docker" }).click();
+    await page.locator("dialog a", { hasText: "在Docker部署Kong Gateway" }).click();
     await expect(page).toHaveURL(/\/kong\/docker-deploy/);
   });
 

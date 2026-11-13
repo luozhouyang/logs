@@ -10,9 +10,13 @@ import { SearchDialog } from "@/components/ui/search";
 import NimbusHead from "@cloudflare/nimbus-docs/components/NimbusHead.astro";
 import type { BasePageProps } from "@cloudflare/nimbus-docs/types";
 
-type Props = BasePageProps;
+type Props = BasePageProps & {
+  /** BCP 47 tag for this page's content. Defaults to the site locale. */
+  lang?: string;
+};
 
 const {
+  lang: pageLang,
   title,
   description,
   noindex,
@@ -24,7 +28,10 @@ const {
   entryId,
 } = Astro.props;
 
-const lang = config.locale ?? "en";
+// Posts are written in more than one language, so the document language is a
+// page concern: a Chinese post tagged `lang="zh-CN"` is what lets screen
+// readers, hyphenation, and the Pagefind index segment it correctly.
+const lang = pageLang ?? config.locale ?? "en";
 // Per-page agent-index pointer. For pages in non-primary or version
 // collections, this resolves to `/<prefix>/llms.txt` (e.g. `/v0/llms.txt`
 // for a v0 docs page, `/blog/llms.txt` for a blog post). Falls back to
@@ -96,6 +103,14 @@ const llmsUrl = Astro.site
       head={pageHead}
       collection={collection}
       entryId={entryId}
+    />
+    <!-- Feed discovery. The pre-Nimbus blog advertised one and readers may
+         still be subscribed; the feed itself lives at /rss.xml. -->
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title={`${config.title} · RSS`}
+      href="/rss.xml"
     />
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">

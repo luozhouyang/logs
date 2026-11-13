@@ -6,33 +6,56 @@ import type { HTMLAttributes } from "astro/types";
 interface Props extends HTMLAttributes<"div"> {
   markdownUrl?: string;
   lastUpdated?: Date;
+  /** Authored publication date. Shown before `lastUpdated` when both exist. */
+  published?: Date;
 }
 
-const { markdownUrl, lastUpdated, class: className, ...attrs } = Astro.props;
+const { markdownUrl, lastUpdated, published, class: className, ...attrs } = Astro.props;
+
+// Calendar dates are authored as date-only strings (UTC midnight) — format in
+// UTC so the day the author wrote never shifts for readers in other zones.
+const dateFormat: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+};
 
 const baseBtn =
   "inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-transparent px-2 py-1 text-muted-foreground no-underline transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2";
 
-const formattedDate = lastUpdated
-  ? new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(lastUpdated)
-  : null;
+const formattedDate = lastUpdated ? new Intl.DateTimeFormat(undefined, dateFormat).format(lastUpdated) : null;
+const formattedPublished = published ? new Intl.DateTimeFormat(undefined, dateFormat).format(published) : null;
+// Avoid "Published X | Updated X" noise: a post that never changed only shows
+// its publication date.
+const showUpdated =
+  lastUpdated !== undefined &&
+  (published === undefined ||
+    lastUpdated.toISOString().slice(0, 10) !== published.toISOString().slice(0, 10));
 ---
 
-{(markdownUrl || lastUpdated) && (
+{(markdownUrl || published || showUpdated) && (
   <div
     data-nb-page-actions
     data-md-url={markdownUrl}
     class={cn("not-prose -ml-2 flex flex-wrap items-center gap-y-1 text-[0.8125rem]", className)}
     {...attrs}
   >
-    {lastUpdated && (
+    {published && (
+      <span class="inline-flex items-center gap-1.5 px-2 py-1 text-muted-foreground">
+        <Icon name="ph:calendar-blank" class="w-3.5 h-3.5" />
+        Published <time datetime={published.toISOString()}>{formattedPublished}</time>
+      </span>
+    )}
+
+    {showUpdated && lastUpdated && (
       <span class="inline-flex items-center gap-1.5 px-2 py-1 text-muted-foreground">
         <Icon name="ph:clock" class="w-3.5 h-3.5" />
         Updated <time datetime={lastUpdated.toISOString()}>{formattedDate}</time>
       </span>
     )}
 
-    {markdownUrl && lastUpdated && (
+    {markdownUrl && (published || showUpdated) && (
       <span aria-hidden="true" class="select-none text-muted-foreground/40">|</span>
     )}
 

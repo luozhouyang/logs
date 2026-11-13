@@ -18,8 +18,9 @@ test.describe("Accessibility", () => {
   test("docs page has proper landmarks", async ({ page, isMobile }) => {
     await page.goto("/kong/introduction");
 
-    // Header landmark
-    await expect(page.locator("header")).toBeVisible();
+    // Header landmark. Use the role, not a bare `header` selector: the Astro
+    // dev toolbar (dev-only) injects <header> elements of its own.
+    await expect(page.getByRole("banner")).toBeVisible();
 
     // Main content
     await expect(page.locator("#main-content")).toBeVisible();
