@@ -5,8 +5,9 @@ built on [Cloudflare Nimbus](https://nimbus-docs.com) — the Astro-based docs
 framework — with Pagefind search.
 
 Live at **<https://luozhouyang.github.io/logs>**, deployed by GitHub Actions to
-GitHub Pages. `SITE_URL`/`SITE_BASE` override the origin and path when the same
-build is served elsewhere — see [Deployment](#deployment).
+GitHub Pages. The origin (`site`) and the `/logs` path (`base`) are fixed in
+`astro.config.ts`, so every URL the build emits carries the prefix — dev
+included.
 
 ## Languages
 
@@ -69,20 +70,17 @@ Only `title` is required. Component and authoring rules are documented in
 | Command | Action |
 | :-- | :-- |
 | `npm install` | Install dependencies |
-| `npm run dev` | Dev server at `localhost:4321` |
+| `npm run dev` | Dev server at `localhost:4321/logs/` |
 | `npm run build` | Build to `dist/` (includes `astro check`, MDX validation, Pagefind) |
 | `npm run preview` | Serve `dist/` locally |
 | `npm run lint:docs` | Lint content (`nimbus-docs lint`), `--fix` to autofix |
 | `npm run typecheck` | `astro check` |
 | `npm run test:e2e` | Playwright suite against the production build under `/logs` (port 4327) |
 
-## URLs and redirects
+## URLs and feeds
 
-Posts used to live at `/blog/<slug>/`. Those paths are kept alive in the
-`redirects` map in `astro.config.ts` — add an entry there whenever a post moves,
-so old links (feeds, search results, other people's bookmarks) keep working.
-
-Feeds are per locale: `/rss.xml` (English) and `/zh/rss.xml` (Chinese). The
+Posts live at `/<section>/<slug>/` (Chinese under `/zh/`); there is no `/blog/`
+segment and no redirect layer. Feeds are per locale: `/rss.xml` (English) and `/zh/rss.xml` (Chinese). The
 sitemap at `/sitemap-index.xml` covers both, and each language has its own
 agent index (`/llms.txt`, `/zh/llms.txt`) plus clean-markdown alternates at
 `<page>/index.md`.
@@ -110,16 +108,17 @@ and published by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
 on every push to `main` (or manually via *Run workflow*). Enable it once under
 **Settings → Pages → Build and deployment → Source: "GitHub Actions"**.
 
-The workflow runs `npm ci && npm run build` with `SITE_URL`/`SITE_BASE` set,
-then uploads `dist/` as the Pages artifact.
+The workflow runs `npm ci && npm run build` and uploads `dist/` as the Pages
+artifact. `site`/`base` live in `astro.config.ts` (`https://luozhouyang.github.io`
++ `/logs/`), so there is nothing to configure in the workflow.
 
 Locally, `npm run preview` serves the build at `/logs/` too, and the e2e suite
 expects that (`E2E_BASE=""` switches it to a root build).
 
-### Base paths
+### Base path
 
 Everything that writes an in-site URL goes through `src/lib/base.ts`
-(`withBase`) — including the locale helper, Nimbus's nav output and redirect
-targets. Content markdown keeps plain `/images/...` paths; a markdown plugin
-prefixes them at build time. If you add a route or component, use `withBase`
-(or `localePath`) rather than a bare `/...` string.
+(`withBase`) — including the locale helper and Nimbus's nav output. Content
+markdown keeps plain `/images/...` paths; a markdown plugin prefixes them at
+build time. If you add a route or component, use `withBase` (or `localePath`)
+rather than a bare `/...` string.

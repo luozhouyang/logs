@@ -35,9 +35,9 @@ site. The original posts were migrated from an Astro blog, so:
   `tags`, `date` (first published, from the old `pubDate`), `lang` (rare
   per-page override), `translatedFrom`. `lastUpdated` is modelled by Nimbus and
   falls back to git history.
-- **Never break a published URL.** When a post moves, add its old path to the
-  `redirects` map in `astro.config.ts` — the pre-Nimbus `/blog/<slug>/` paths
-  are kept alive there.
+- **No redirect layer.** The site has a single URL shape: `/<section>/<slug>/`
+  (and `/zh/…`). Don't add a `redirects` map to `astro.config.ts`; the
+  pre-Nimbus `/blog/…` URLs are gone on purpose.
 - **Search is per language.** Pagefind indexes each page under its
   `<html lang>` and the dialog queries the current page's language index, so
   English pages search English posts and `/zh/` pages search Chinese ones.

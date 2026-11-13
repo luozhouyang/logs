@@ -7,26 +7,16 @@ import { baseContentUrls } from "./src/lib/markdown-base";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// GitHub Pages serves project sites under /<repo>/, so the site is built for
-// https://luozhouyang.github.io/logs by default. The same source can still be
-// built for a domain root with `SITE_URL=https://example.com SITE_BASE= npm run build`.
-const SITE_URL = process.env.SITE_URL ?? "https://luozhouyang.github.io";
-// Trailing slash matters: NimbusHead concatenates `import.meta.env.BASE_URL`
+// The site lives at https://luozhouyang.github.io/logs — a GitHub Pages project
+// site, so everything is mounted under /logs/. Astro's `site` is the origin and
+// `base` is the path; together they produce https://luozhouyang.github.io/logs/…
+// (dev included: `pnpm dev` serves http://localhost:4321/logs/).
+//
+// The trailing slash matters: NimbusHead concatenates `import.meta.env.BASE_URL`
 // with file names ("favicon.ico", "_nimbus/shiki.css"), so it must end in "/".
-const SITE_BASE = process.env.SITE_BASE ?? "/logs/";
-
-// `astro dev` gets a root-mounted site: `pnpm dev` prints http://localhost:4321
-// and that URL should be the site, not a 404 outside the deploy prefix. Builds
-// and previews keep the real base, so what ships is still /logs/.
-const isDevCommand =
-  process.env.npm_lifecycle_event === "dev" || process.argv[2] === "dev";
-const EFFECTIVE_BASE =
-  isDevCommand && process.env.SITE_BASE === undefined ? "" : SITE_BASE;
-const BASE_PREFIX = EFFECTIVE_BASE.replace(/\/+$/, "");
-
-/** Prefix an in-site path for the deployment base (used by redirects). */
-const withBasePath = (path: string) =>
-  !BASE_PREFIX ? path : path === "/" ? `${BASE_PREFIX}/` : `${BASE_PREFIX}${path}`;
+const SITE_URL = "https://luozhouyang.github.io";
+const SITE_BASE = "/logs/";
+const BASE_PREFIX = SITE_BASE.replace(/\/+$/, "");
 
 /**
  * NimbusHead hardcodes `<link rel="sitemap" href="/sitemap-index.xml">`, which
@@ -77,23 +67,7 @@ const nimbusConfig = defineNimbusConfig({
 export default defineConfig({
   output: "static",
   site: SITE_URL,
-  base: EFFECTIVE_BASE,
-  // The pre-Nimbus site served posts at /blog/<slug>/ and paginated listings
-  // at /page/<n>/. Those URLs are in the wild, so keep them alive instead of
-  // 404-ing: each one points at the post wherever it now lives.
-  // Astro emits these redirect pages at the old paths but does not add `base`
-  // to the destination, so it is added here.
-  redirects: {
-    "/blog": withBasePath("/"),
-    "/blog/building-an-image-hosting-platform-with-cloudflare-r2": withBasePath("/cloudflare/r2-image-hosting"),
-    "/blog/cloudflare-wrangler-usage-tips": withBasePath("/cloudflare/wrangler-tips"),
-    "/blog/kong-introduction": withBasePath("/kong/introduction"),
-    "/blog/kong-gateway-docker-deploy": withBasePath("/kong/docker-deploy"),
-    "/page/1": withBasePath("/"),
-    // The old starter "About me" page was placeholder copy; there is no
-    // equivalent page now, so send the link home rather than 404 it.
-    "/about": withBasePath("/"),
-  },
+  base: SITE_BASE,
   // Tailwind v4 via its Vite plugin (the integration Astro recommends for
   // Tailwind v4 — replaces the PostCSS plugin, which doesn't build under
   // Astro 7's Vite 8 bundler).
@@ -125,7 +99,7 @@ export default defineConfig({
       markdown: {
         // tableScroll wraps wide tables; baseContentUrls rewrites `/images/…`
         // and other root-relative content URLs for the /logs deployment.
-        hastPlugins: [tableScroll(), baseContentUrls(EFFECTIVE_BASE)],
+        hastPlugins: [tableScroll(), baseContentUrls(SITE_BASE)],
       },
     }),
   ],
