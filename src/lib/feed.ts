@@ -10,6 +10,7 @@ import rss from "@astrojs/rss";
 import { getLastUpdated } from "@cloudflare/nimbus-docs";
 import { config } from "virtual:nimbus/config";
 import { locales, localePath, type Locale } from "./i18n";
+import { withBase } from "./base";
 import { loadEntries } from "./content";
 
 interface FeedItem {
@@ -38,7 +39,8 @@ export async function buildFeed(locale: Locale, site: URL | undefined) {
   return rss({
     title: config.title,
     description: config.description ?? "",
-    site: site ?? config.site,
+    // Resolve item links against the deployment base, not the domain root.
+    site: new URL(withBase("/"), site ?? config.site),
     items,
     customData: `<language>${locales[locale].htmlLang}</language>`,
   });

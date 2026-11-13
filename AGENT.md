@@ -41,9 +41,18 @@ site. The original posts were migrated from an Astro blog, so:
 - **Search is per language.** Pagefind indexes each page under its
   `<html lang>` and the dialog queries the current page's language index, so
   English pages search English posts and `/zh/` pages search Chinese ones.
-- **E2E runs against the production build** (`astro preview` on port 4327 via
-  `playwright.config.ts`), not the dev server — the dev toolbar injects its own
-  `<header>` elements and the static build is what actually ships.
+- **The site is deployed under a base path** (`/logs` on GitHub Pages). Never
+  hardcode a root-relative URL in a component or route: use `withBase()` from
+  `src/lib/base.ts` (or `localePath()` for locale-aware links). Nimbus 0.8
+  predates `base`, so the post routes strip the base before calling its nav
+  helpers and re-prefix the results; markdown content URLs are rewritten by
+  `src/lib/markdown-base.ts`; redirect targets in `astro.config.ts` are
+  prefixed at config time.
+- **E2E runs against the production build** (`astro preview` on port 4327 under
+  `/logs` via `playwright.config.ts`), not the dev server — the dev toolbar
+  injects its own `<header>` elements and the static build is what actually
+  ships. Tests use `url()` from `e2e/helpers.ts` for in-site paths
+  (`E2E_BASE=""` runs them against a root build).
 
 ## File layout
 

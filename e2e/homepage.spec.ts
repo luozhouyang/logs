@@ -1,11 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { url } from "./helpers";
 
 // The landing page is a single interactive terminal: it plays a scripted tour
 // of every section and post, hands control over as soon as you type, and picks
 // the tour back up after `data-idle-ms` of inactivity (10s by default).
 test.describe("Homepage terminal", () => {
   test("shows a single terminal with the site heading", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     await expect(page.locator("[data-terminal]")).toBeVisible();
     await expect(page.locator("h1")).toContainText("luozhouyang");
     await expect(page.locator("[data-term-input]")).toBeVisible();
@@ -13,7 +14,7 @@ test.describe("Homepage terminal", () => {
   });
 
   test("auto-plays the tour and lists the sections", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     const output = page.locator("[data-term-output]");
     await expect(output).toContainText("$ whoami");
     await expect(output).toContainText("$ ls");
@@ -22,7 +23,7 @@ test.describe("Homepage terminal", () => {
   });
 
   test("typing takes over and commands run", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     const input = page.locator("[data-term-input]");
 
     await input.click();
@@ -41,8 +42,19 @@ test.describe("Homepage terminal", () => {
     );
   });
 
+  test("whoami links to GitHub", async ({ page }) => {
+    await page.goto(url("/"));
+    const input = page.locator("[data-term-input]");
+    await input.click();
+    await input.fill("whoami");
+    await input.press("Enter");
+    await expect(
+      page.locator('[data-term-output] a[href="https://github.com/luozhouyang"]'),
+    ).toBeVisible();
+  });
+
   test("unknown commands fail loudly", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     const input = page.locator("[data-term-input]");
     await input.click();
     await input.fill("sudo rm -rf /");
@@ -51,7 +63,7 @@ test.describe("Homepage terminal", () => {
   });
 
   test("the tour resumes after the idle delay", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     // Shorten the 10s default just for this test.
     await page
       .locator("[data-terminal]")
@@ -68,7 +80,7 @@ test.describe("Homepage terminal", () => {
   });
 
   test("keeps a crawlable list of every post", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     const mirror = page.locator("nav[aria-label='All posts']");
     await expect(mirror.locator("a")).toHaveCount(14);
   });

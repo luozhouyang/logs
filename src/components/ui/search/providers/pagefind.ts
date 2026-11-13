@@ -68,13 +68,19 @@ export const provider: SearchProvider = {
       defaultFilters ? { filters: defaultFilters } : undefined,
     );
     const results = await Promise.all(search.results.slice(0, 10).map((result) => result.data()));
+    // Pagefind indexes paths relative to the site root; GH Pages serves the
+    // site under a base path, so every result needs the prefix.
+    const base = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+    const withBase = (url: string) =>
+      base && url.startsWith("/") && !url.startsWith(`${base}/`) ? `${base}${url}` : url;
+
     return results.map((result): SearchResult => ({
       title: result.meta?.title ?? "Untitled",
-      url: result.url,
+      url: withBase(result.url),
       snippet: result.excerpt,
       subResults: result.sub_results
         ?.filter((sub): sub is Required<PagefindSubResult> => Boolean(sub.title && sub.url))
-        .map((sub) => ({ title: sub.title, url: sub.url })),
+        .map((sub) => ({ title: sub.title, url: withBase(sub.url) })),
     }));
   },
 };

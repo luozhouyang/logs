@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "base": "/",
+  "base": "/logs/",
   "knownRoutes": [
     "/",
     "/404",

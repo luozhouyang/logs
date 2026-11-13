@@ -17,6 +17,7 @@ import {
 } from "@cloudflare/nimbus-docs";
 import { components } from "../components";
 import { translationsFor } from "../lib/blog-nav";
+import { stripBase, withBase, withBaseDeep } from "../lib/base";
 
 export const prerender = true;
 export const getStaticPaths = getDocsStaticPaths;
@@ -24,24 +25,38 @@ export const getStaticPaths = getDocsStaticPaths;
 const { entry, Content, headings } = await getDocsPageProps(Astro);
 
 const currentSlug = Astro.url.pathname.replace(/\/$/, "") || "/";
+// Nimbus compares nav links against a root-relative path, so hand it the
+// route without the deployment base; the hrefs are re-prefixed below.
+const routeSlug = stripBase(currentSlug);
 
 const { sidebar: sidebarOn, tableOfContents: tocOn } = await getRouteFlags(entry);
 
-const sidebar = sidebarOn
-  ? await getSidebar(currentSlug, { collection: entry.collection })
+// Nimbus 0.8 predates `base`: it builds root-relative nav links and compares
+// them against a root-relative path. Build with the stripped path, then prefix
+// the links for /logs — prev/next must read the *unprefixed* tree, or it can't
+// find the current page.
+const rawSidebar = sidebarOn
+  ? await getSidebar(routeSlug, { collection: entry.collection })
   : false;
-const prevNext = await getPrevNext(currentSlug, {
-  sidebarTree: sidebar === false ? [] : sidebar,
-  overrides: { prev: entry.data.prev, next: entry.data.next },
-});
-const breadcrumbs = await getBreadcrumbs(currentSlug, { collection: entry.collection });
+const sidebar = rawSidebar === false ? false : withBaseDeep(rawSidebar);
+const prevNext = withBaseDeep(
+  await getPrevNext(routeSlug, {
+    sidebarTree: rawSidebar === false ? [] : rawSidebar,
+    overrides: { prev: entry.data.prev, next: entry.data.next },
+  }),
+);
+const breadcrumbs = withBaseDeep(
+  await getBreadcrumbs(routeSlug, { collection: entry.collection }),
+);
 const editUrl = await getEditUrl(entry);
 // Frontmatter wins; git is the fallback.
 const lastUpdated = entry.data.lastUpdated ?? (await getLastUpdated(entry));
 const tocConfig = entry.data.tableOfContents;
 const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
-const markdownUrl = `/${entry.id}/index.md`;
-const socialImage = entry.data.socialImage ?? `/og/${entry.id}.png`;
+const markdownUrl = withBase(`/${entry.id}/index.md`);
+const socialImage = entry.data.socialImage
+  ? withBase(entry.data.socialImage)
+  : withBase(`/og/${entry.id}.png`);
 const translations = await translationsFor("en", entry.id);
 ---
 

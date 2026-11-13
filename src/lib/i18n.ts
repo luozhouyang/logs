@@ -1,3 +1,5 @@
+import { stripBase, withBase } from "./base";
+
 /**
  * Site locales.
  *
@@ -28,16 +30,19 @@ export type LocaleCollection = (typeof collections)[Locale];
 
 /** The locale a pathname belongs to, based on its prefix. */
 export function parseLocale(pathname: string): Locale {
-  const [, first] = pathname.split("/");
+  const [, first] = stripBase(pathname).split("/");
   return first === "zh" ? "zh" : defaultLocale;
 }
 
-/** Prefix an in-site path (`/kong/x/`) for a locale (`/zh/kong/x/`). */
+/**
+ * Prefix an in-site path (`/kong/x/`) for a locale (`/zh/kong/x/`) and for the
+ * deployment base (`/logs/zh/kong/x/`).
+ */
 export function localePath(locale: Locale, path: string): string {
   const clean = path.startsWith("/") ? path : `/${path}`;
   const base = locales[locale].base;
-  if (!base) return clean;
-  return clean === "/" ? `${base}/` : `${base}${clean}`;
+  const localized = base ? (clean === "/" ? `${base}/` : `${base}${clean}`) : clean;
+  return withBase(localized);
 }
 
 /** Strip a locale prefix from a pathname, yielding the default-locale path. */

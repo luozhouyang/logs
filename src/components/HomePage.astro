@@ -13,7 +13,7 @@ import { config } from "virtual:nimbus/config";
 import { getLastUpdated } from "@cloudflare/nimbus-docs";
 import { buildNav } from "../lib/blog-nav";
 import { getCategoryFromId, loadEntries } from "../lib/content";
-import type { Locale } from "../lib/i18n";
+import { localePath, type Locale } from "../lib/i18n";
 
 interface Props {
   locale: Locale;
@@ -35,7 +35,7 @@ const posts = (
       const date = entry.data.date ?? entry.data.lastUpdated ?? (await getLastUpdated(entry));
       return {
         id: entry.id,
-        href: isZh ? `/zh/${entry.id}/` : `/${entry.id}/`,
+        href: localePath(locale, `/${entry.id}/`),
         title: entry.data.title,
         description: entry.data.description ?? "",
         date: date ? date.toISOString().slice(0, 10) : "",
@@ -132,10 +132,12 @@ const terminalData = {
   sections,
   posts,
   links: {
-    rss: isZh ? "/zh/rss.xml" : "/rss.xml",
-    llms: isZh ? "/zh/llms.txt" : "/llms.txt",
+    rss: localePath(locale, "/rss.xml"),
+    llms: localePath(locale, "/llms.txt"),
     github: config.github ?? "https://github.com/luozhouyang",
-    other: isZh ? { href: "/", label: "english" } : { href: "/zh/", label: "中文" },
+    other: isZh
+      ? { href: localePath("en", "/"), label: "english" }
+      : { href: localePath("zh", "/"), label: "中文" },
   },
   copy,
   idleMs: 10000,

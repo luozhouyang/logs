@@ -270,6 +270,7 @@ export function initTerminal(root: HTMLElement, data: TerminalData) {
         break;
       case "whoami":
         for (const line of whoamiLines) push([node("span", "term-out", line)]);
+        push([node("span", "term-dim", "github  "), link(data.links.github, data.links.github)]);
         break;
       case "about":
         for (const line of aboutLines) push([node("span", "term-out", line)]);

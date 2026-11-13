@@ -32,7 +32,9 @@ export default defineConfig({
   // and stays free of the dev toolbar, which injects its own <header>s.
   webServer: {
     command: `npm run build && npm run preview -- --port ${PORT}`,
-    url: `http://localhost:${PORT}`,
+    // The site is built for GitHub Pages under /logs, and `astro preview`
+    // serves it there — the readiness probe must hit that path.
+    url: `http://localhost:${PORT}/logs/`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

@@ -2,7 +2,12 @@
 
 A personal blog about Cloudflare, Kong Gateway, Docker, and self-hosting. It is
 built on [Cloudflare Nimbus](https://nimbus-docs.com) — the Astro-based docs
-framework — with Pagefind search and static hosting on Cloudflare Workers.
+framework — with Pagefind search.
+
+Live at **<https://luozhouyang.github.io/logs>**, deployed by GitHub Actions to
+GitHub Pages. The same build can still target a domain root (Cloudflare
+Workers) with the `SITE_URL`/`SITE_BASE` environment variables — see
+[Deployment](#deployment).
 
 ## Languages
 
@@ -70,8 +75,8 @@ Only `title` is required. Component and authoring rules are documented in
 | `npm run preview` | Serve `dist/` locally |
 | `npm run lint:docs` | Lint content (`nimbus-docs lint`), `--fix` to autofix |
 | `npm run typecheck` | `astro check` |
-| `npm run test:e2e` | Playwright suite against the production build (port 4327) |
-| `npm run deploy` | Check, build, and `wrangler deploy` |
+| `npm run test:e2e` | Playwright suite against the production build under `/logs` (port 4327) |
+| `npm run deploy` | Check, build, and `wrangler deploy` (Cloudflare Workers) |
 
 ## URLs and redirects
 
@@ -96,9 +101,33 @@ when no labels are passed.
 
 ## Deployment
 
-`wrangler.jsonc` serves `dist/` as static assets on Cloudflare Workers with a
-custom 404 page:
+### GitHub Pages (default)
+
+The site is built for `https://luozhouyang.github.io/logs`, i.e. `base: "/logs/"`,
+and published by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+on every push to `main` (or manually via *Run workflow*). Enable it once under
+**Settings → Pages → Build and deployment → Source: "GitHub Actions"**.
+
+The workflow runs `npm ci && npm run build` with `SITE_URL`/`SITE_BASE` set,
+then uploads `dist/` as the Pages artifact.
+
+Locally, `npm run preview` serves the build at `/logs/` too, and the e2e suite
+expects that (`E2E_BASE=""` switches it to a root build).
+
+### Cloudflare Workers
+
+`wrangler.jsonc` serves `dist/` as static assets. Because the default build is
+now mounted at `/logs`, build a root-deployable bundle first:
 
 ```sh
-npm run deploy
+SITE_URL=https://luozhouyang.com SITE_BASE= npm run build
+npx wrangler deploy
 ```
+
+### Base paths
+
+Everything that writes an in-site URL goes through `src/lib/base.ts`
+(`withBase`) — including the locale helper, Nimbus's nav output and redirect
+targets. Content markdown keeps plain `/images/...` paths; a markdown plugin
+prefixes them at build time. If you add a route or component, use `withBase`
+(or `localePath`) rather than a bare `/...` string.

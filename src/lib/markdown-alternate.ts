@@ -11,6 +11,7 @@ import {
   type IndexedEntry,
 } from "@cloudflare/nimbus-docs";
 import { config } from "virtual:nimbus/config";
+import { withBase } from "./base";
 
 export interface MarkdownProps {
   item: IndexedEntry;
@@ -44,12 +45,12 @@ export function renderMarkdownResponse({ item }: MarkdownProps) {
     "---",
     `title: ${JSON.stringify(title)}`,
     ...(description ? [`description: ${JSON.stringify(description)}`] : []),
-    ...(socialImage ? [`image: ${JSON.stringify(new URL(socialImage, config.site).href)}`] : []),
+    ...(socialImage ? [`image: ${JSON.stringify(new URL(withBase(socialImage), config.site).href)}`] : []),
     ...(version ? [`version: ${JSON.stringify(version)}`] : []),
     "---",
     "",
     "> Documentation Index",
-    `> Fetch the complete documentation index at: ${new URL(llmsIndex, config.site).href}`,
+    `> Fetch the complete documentation index at: ${new URL(withBase(llmsIndex), config.site).href}`,
     "> Use this file to discover all available pages before exploring further.",
     "",
     `# ${title}`,
@@ -57,7 +58,7 @@ export function renderMarkdownResponse({ item }: MarkdownProps) {
     markdown,
     "",
     // Point at the authored source (`.mdx` twin) when it exists.
-    `Source: ${new URL(sourceUrl ?? markdownUrl, config.site).href}`,
+    `Source: ${new URL(withBase(sourceUrl ?? markdownUrl), config.site).href}`,
     "",
   ].join("\n");
 

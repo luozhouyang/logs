@@ -17,6 +17,7 @@ import {
 import { components } from "../../components";
 import { buildBreadcrumbs, buildNav, findPrevNext, translationsFor } from "../../lib/blog-nav";
 import { ui } from "../../lib/i18n";
+import { withBase } from "../../lib/base";
 
 export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("zh");
@@ -34,8 +35,10 @@ const tocConfig = entry.data.tableOfContents;
 const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
 
 const lastUpdated = entry.data.lastUpdated ?? (await getLastUpdated(entry));
-const markdownUrl = `/zh/${entry.id}/index.md`;
-const socialImage = entry.data.socialImage ?? `/og/zh/${entry.id}.png`;
+const markdownUrl = withBase(`/zh/${entry.id}/index.md`);
+const socialImage = entry.data.socialImage
+  ? withBase(entry.data.socialImage)
+  : withBase(`/og/zh/${entry.id}.png`);
 const translations = await translationsFor("zh", entry.id);
 ---
 

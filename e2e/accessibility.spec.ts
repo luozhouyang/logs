@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
+import { url } from "./helpers";
 
 test.describe("Accessibility", () => {
   test("homepage has no critical a11y violations", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     // Check skip-to-content link exists
     const skipLink = page.locator("a[href='#main-content']");
     await expect(skipLink).toHaveCount(1);
@@ -16,7 +17,7 @@ test.describe("Accessibility", () => {
   });
 
   test("docs page has proper landmarks", async ({ page, isMobile }) => {
-    await page.goto("/kong/introduction");
+    await page.goto(url("/kong/introduction"));
 
     // Header landmark. Use the role, not a bare `header` selector: the Astro
     // dev toolbar (dev-only) injects <header> elements of its own.
@@ -35,7 +36,7 @@ test.describe("Accessibility", () => {
   });
 
   test("all images have alt text", async ({ page }) => {
-    await page.goto("/kong/docker-deploy");
+    await page.goto(url("/kong/docker-deploy"));
     const images = page.locator("article img");
     const count = await images.count();
     for (let i = 0; i < count; i++) {
@@ -45,7 +46,7 @@ test.describe("Accessibility", () => {
   });
 
   test("interactive elements are keyboard accessible", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     // Tab to first interactive element
     await page.keyboard.press("Tab");
     // Skip link should be focused first
@@ -54,7 +55,7 @@ test.describe("Accessibility", () => {
   });
 
   test("color contrast - text is readable", async ({ page }) => {
-    await page.goto("/kong/introduction");
+    await page.goto(url("/kong/introduction"));
     // Verify foreground text color is set (not transparent/invisible)
     const body = page.locator("body");
     const color = await body.evaluate((el) => getComputedStyle(el).color);
@@ -80,7 +81,7 @@ test.describe("Visual screenshots", () => {
   }
 
   test("homepage light mode", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     await page.evaluate(() => localStorage.setItem("ui-mode", "light"));
     await page.reload();
     await page.waitForLoadState("networkidle");
@@ -92,7 +93,7 @@ test.describe("Visual screenshots", () => {
   });
 
   test("homepage dark mode", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(url("/"));
     await page.evaluate(() => localStorage.setItem("ui-mode", "dark"));
     await page.reload();
     await page.waitForLoadState("networkidle");
@@ -105,7 +106,7 @@ test.describe("Visual screenshots", () => {
 
   test("docs page light mode", async ({ page, isMobile }) => {
     test.skip(isMobile, "Desktop only screenshot");
-    await page.goto("/kong/docker-deploy");
+    await page.goto(url("/kong/docker-deploy"));
     await page.evaluate(() => localStorage.setItem("ui-mode", "light"));
     await page.reload();
     await page.waitForLoadState("networkidle");
@@ -117,7 +118,7 @@ test.describe("Visual screenshots", () => {
 
   test("docs page dark mode", async ({ page, isMobile }) => {
     test.skip(isMobile, "Desktop only screenshot");
-    await page.goto("/kong/docker-deploy");
+    await page.goto(url("/kong/docker-deploy"));
     await page.evaluate(() => localStorage.setItem("ui-mode", "dark"));
     await page.reload();
     await page.waitForLoadState("networkidle");
@@ -128,7 +129,7 @@ test.describe("Visual screenshots", () => {
   });
 
   test("404 page", async ({ page }) => {
-    await page.goto("/nonexistent");
+    await page.goto(url("/nonexistent"));
     await page.waitForLoadState("networkidle");
     await expect(page).toHaveScreenshot("404-page.png", {
       fullPage: true,
