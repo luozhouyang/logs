@@ -7,8 +7,18 @@ import { SearchTrigger } from "./ui/search";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { Badge } from "./ui/badge";
 import { config } from "virtual:nimbus/config";
-import { getSidebarSections } from "@cloudflare/nimbus-docs";
 import { getCategories, getTags } from "../lib/taxonomy";
+import {
+  locales,
+  localePath,
+  localeHome,
+  otherLocale,
+  parseLocale,
+  ui,
+  type TranslationLinks,
+} from "../lib/i18n";
+import { sectionOf } from "../lib/blog-nav";
+import { chrome } from "../lib/ui-labels";
 
 interface Props {
   /** Astro collection id for the current page, forwarded from DocsLayout. */
@@ -21,26 +31,54 @@ interface Props {
    * shouldn't show a button that opens an empty dialog. Default `true`.
    */
   showSidebar?: boolean;
+  /**
+   * Where the current page lives in the other locale. Pages that don't pass
+   * it still get a switcher; it sends readers to the other locale's home.
+   */
+  translations?: TranslationLinks;
 }
 
-// `entryId` is part of Props as a forward-compat hook (the version-switcher
-// recipe reads it) but the base Header doesn't use it — leave it off the
-// destructure to avoid an unused-var warning.
-const { collection, showSidebar = true } = Astro.props;
+const { showSidebar = true, translations } = Astro.props;
 
-// Normalize trailing slash so isActive matches sidebar hrefs.
+// Locale comes from the URL: English at the root, everything else under its
+// prefix. That keeps the header correct on every page, including the ones
+// that don't use a docs layout.
+const locale = parseLocale(Astro.url.pathname);
+const labels = ui[locale];
+const chromeLabels = chrome(locale);
+
 const currentSlug = Astro.url.pathname.replace(/\/$/, "") || "/";
-const sections = await getSidebarSections(currentSlug, { collection });
-const showSections = sections.length >= 2;
+const categories = await getCategories(locale);
+const tags = await getTags(locale);
 
-const categories = await getCategories();
-const tags = await getTags();
+// Which section the reader is in, for the tab strip. `/zh/kong/x/` → `kong`.
+const withinBase = locales[locale].base
+  ? currentSlug.slice(locales[locale].base.length) || "/"
+  : currentSlug;
+const segments = withinBase.split("/").filter(Boolean);
+const currentSection =
+  segments.length > 1 && segments[0] !== "categories" && segments[0] !== "tags"
+    ? sectionOf(segments.slice(1).join("/"))
+    : segments.length > 2 && segments[0] === "categories"
+      ? segments[1]
+      : segments.length > 2 && segments[0] === "tags"
+        ? segments[1]
+        : undefined;
+
+const showSections = categories.length >= 2;
+
+// Language switcher target: the translated page when one exists, otherwise the
+// other locale's home. `alternate` is what we link to; `current` is shown as
+// the active language.
+const alternateLocale = otherLocale(locale);
+const alternateHref = translations?.[alternateLocale] ?? localeHome(alternateLocale);
+const openMenuLabel = labels.menu;
 ---
 
 <header class="sticky top-0 z-30 border-b border-border bg-card/80 backdrop-blur-lg">
   <div class="mx-auto flex items-center justify-between h-14 px-4 lg:px-6">
     <div class="flex items-center gap-3">
-      <a href="/" class="group">
+      <a href={localePath(locale, "/")} class="group" hreflang={locale}>
         <span class="font-semibold text-sm text-foreground group-hover:text-primary transition-colors">
           {config.title}
         </span>
@@ -48,13 +86,13 @@ const tags = await getTags();
 
       {showSections && (
         <nav aria-label="Sections" class="hidden md:flex items-center gap-1 ml-4 pl-4 border-l border-border h-6">
-          {sections.map((section) => (
+          {categories.map((section) => (
             <a
-              href={section.href}
-              aria-current={section.isActive ? "page" : undefined}
+              href={localePath(locale, `/categories/${section.slug}/`)}
+              aria-current={section.slug === currentSection ? "page" : undefined}
               class:list={[
                 "px-2 py-1 rounded-md text-[0.8125rem] font-medium no-underline transition-colors",
-                section.isActive
+                section.slug === currentSection
                   ? "text-foreground bg-accent"
                   : "text-muted-foreground hover:text-foreground hover:bg-accent/60",
               ]}
@@ -72,14 +110,14 @@ const tags = await getTags();
           <PopoverTrigger
             class="flex items-center gap-1 px-2 py-1 rounded-md text-[0.8125rem] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
           >
-            Categories
+            {labels.categories}
             <Icon name="ph:caret-down" class="w-3 h-3" />
           </PopoverTrigger>
           <PopoverContent placement="bottom-end" class="w-56">
             <div class="flex flex-col gap-0.5">
               {categories.map((cat) => (
                 <a
-                  href={`/categories/${cat.slug}/`}
+                  href={localePath(locale, `/categories/${cat.slug}/`)}
                   class="flex items-center justify-between px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 no-underline transition-colors"
                 >
                   {cat.label}
@@ -89,10 +127,10 @@ const tags = await getTags();
             </div>
             <div class="mt-1.5 border-t border-border pt-1.5">
               <a
-                href="/categories/"
+                href={localePath(locale, "/categories/")}
                 class="block px-2 py-1.5 rounded-md text-sm font-medium text-primary hover:bg-accent/60 no-underline transition-colors"
               >
-                All categories &rarr;
+                {labels.allCategories} &rarr;
               </a>
             </div>
           </PopoverContent>
@@ -102,13 +140,13 @@ const tags = await getTags();
           <PopoverTrigger
             class="flex items-center gap-1 px-2 py-1 rounded-md text-[0.8125rem] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
           >
-            Tags
+            {labels.tags}
             <Icon name="ph:caret-down" class="w-3 h-3" />
           </PopoverTrigger>
           <PopoverContent placement="bottom-end" class="w-64">
             <div class="flex flex-wrap gap-1.5 p-1">
               {tags.map((tag) => (
-                <a href={`/tags/${tag.slug}/`} class="no-underline">
+                <a href={localePath(locale, `/tags/${tag.slug}/`)} class="no-underline">
                   <Badge size="small" class="cursor-pointer hover:opacity-80 transition-opacity">
                     {tag.label}
                     <span class="ml-1 opacity-60">{tag.count}</span>
@@ -118,17 +156,32 @@ const tags = await getTags();
             </div>
             <div class="mt-1.5 border-t border-border pt-1.5">
               <a
-                href="/tags/"
+                href={localePath(locale, "/tags/")}
                 class="block px-2 py-1.5 rounded-md text-sm font-medium text-primary hover:bg-accent/60 no-underline transition-colors"
               >
-                All tags &rarr;
+                {labels.allTags} &rarr;
               </a>
             </div>
           </PopoverContent>
         </Popover>
       </nav>
 
-      {config.search !== false && <SearchTrigger />}
+      {config.search !== false && (
+        <SearchTrigger label={chromeLabels.searchLabel} ariaLabel={chromeLabels.searchAria} />
+      )}
+
+      <a
+        href={alternateHref}
+        hreflang={locales[alternateLocale].htmlLang}
+        lang={locales[alternateLocale].htmlLang}
+        aria-label={labels.switchToLabel}
+        title={labels.switchToLabel}
+        class="inline-flex h-7 items-center rounded-md border border-border px-2 text-[0.75rem] font-medium text-muted-foreground no-underline transition-colors hover:bg-accent hover:text-foreground"
+        data-lang-switch={alternateLocale}
+      >
+        {labels.switchTo}
+      </a>
+
       {config.github && (
         <LinkButton
           href={config.github}
@@ -150,7 +203,7 @@ const tags = await getTags();
           shape="square"
           size="sm"
           icon="ph:list"
-          aria-label="Open navigation"
+          aria-label={openMenuLabel}
           data-menu-btn
           class="lg:hidden text-muted-foreground"
         />

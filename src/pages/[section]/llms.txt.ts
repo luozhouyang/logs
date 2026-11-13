@@ -21,6 +21,15 @@ import { config } from "virtual:nimbus/config";
 
 export const prerender = true;
 
+/**
+ * Readable heading for sections that are whole collections. Nimbus labels a
+ * secondary collection with its collection id, which would leave the Chinese
+ * index headed "# zh".
+ */
+const SECTION_LABELS: Record<string, string> = {
+  zh: "中文 (Chinese)",
+};
+
 interface SectionProps {
   slug: string;
   label: string;
@@ -38,7 +47,7 @@ export async function getStaticPaths() {
       params: { section: group.slug },
       props: {
         slug: group.slug,
-        label: group.label,
+        label: SECTION_LABELS[group.slug] ?? group.label,
         members: group.members,
       } as SectionProps,
     }));

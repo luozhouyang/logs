@@ -1,0 +1,66 @@
+---
+/**
+ * Chinese post page — the `zh` collection, mounted at /zh/.
+ *
+ * Same layout and shape as the English route, but navigation comes from
+ * `lib/blog-nav` (Nimbus's sidebar/breadcrumb helpers only prefix *versions*,
+ * not second locales) and every generated URL carries the /zh prefix.
+ */
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import {
+  getCollectionStaticPaths,
+  getCollectionPageProps,
+  getRouteFlags,
+  getTOC,
+  getLastUpdated,
+} from "@cloudflare/nimbus-docs";
+import { components } from "../../components";
+import { buildBreadcrumbs, buildNav, findPrevNext, translationsFor } from "../../lib/blog-nav";
+import { ui } from "../../lib/i18n";
+
+export const prerender = true;
+export const getStaticPaths = getCollectionStaticPaths("zh");
+
+const { entry, Content, headings } = await getCollectionPageProps<"zh">(Astro);
+
+const currentSlug = Astro.url.pathname.replace(/\/$/, "") || "/";
+const { sidebar: sidebarOn, tableOfContents: tocOn } = await getRouteFlags(entry);
+
+const sidebar = sidebarOn ? await buildNav("zh", currentSlug) : false;
+const prevNext = findPrevNext(Array.isArray(sidebar) ? sidebar : [], currentSlug);
+const breadcrumbs = buildBreadcrumbs("zh", entry, ui.zh.home);
+
+const tocConfig = entry.data.tableOfContents;
+const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
+
+const lastUpdated = entry.data.lastUpdated ?? (await getLastUpdated(entry));
+const markdownUrl = `/zh/${entry.id}/index.md`;
+const socialImage = entry.data.socialImage ?? `/og/zh/${entry.id}.png`;
+const translations = await translationsFor("zh", entry.id);
+---
+
+<DocsLayout
+  title={entry.data.title}
+  description={entry.data.description}
+  sidebar={sidebar}
+  headings={toc}
+  breadcrumbs={breadcrumbs}
+  prevNext={prevNext}
+  mode={entry.data.mode}
+  banner={entry.data.banner}
+  head={entry.data.head}
+  searchable={entry.data.searchable}
+  noindex={entry.data.noindex}
+  markdownUrl={markdownUrl}
+  socialImage={socialImage}
+  lastUpdated={lastUpdated}
+  published={entry.data.date}
+  draft={entry.data.draft}
+  audience={entry.data.audience}
+  collection={entry.collection}
+  entryId={entry.id}
+  lang="zh-CN"
+  translations={translations}
+>
+  <Content components={components} />
+</DocsLayout>

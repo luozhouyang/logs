@@ -4,9 +4,9 @@ test.describe("Navigation", () => {
   test("sidebar navigates between pages", async ({ page, isMobile }) => {
     test.skip(isMobile, "Sidebar is hidden on mobile");
     await page.goto("/kong/introduction");
-    await page.locator("#desktop-sidebar a", { hasText: "在Docker部署Kong Gateway" }).click();
+    await page.locator("#desktop-sidebar a", { hasText: "Deploying Kong Gateway with Docker" }).click();
     await expect(page).toHaveURL(/\/kong\/docker-deploy/);
-    await expect(page.locator("h1")).toContainText("在Docker部署Kong Gateway");
+    await expect(page.locator("h1")).toContainText("Deploying Kong Gateway with Docker");
   });
 
   test("mobile menu opens and closes sidebar", async ({ page, isMobile }) => {
@@ -30,7 +30,7 @@ test.describe("Navigation", () => {
     test.skip(!isMobile, "Mobile menu only on mobile");
     await page.goto("/kong/introduction");
     await page.locator("[data-menu-btn]").click();
-    await page.locator("dialog a", { hasText: "在Docker部署Kong Gateway" }).click();
+    await page.locator("dialog a", { hasText: "Deploying Kong Gateway with Docker" }).click();
     await expect(page).toHaveURL(/\/kong\/docker-deploy/);
   });
 
@@ -53,9 +53,9 @@ test.describe("Navigation", () => {
     test.skip(isMobile, "Section tabs hidden on mobile");
     await page.goto("/kong/introduction");
     const sections = page.locator("nav[aria-label='Sections']");
-    // Sections only show when there are 2+ top-level groups
+    // One tab per top-level section (cloudflare, e-commerce, kong).
     if (await sections.isVisible()) {
-      await expect(sections.locator("a")).toHaveCount(2);
+      await expect(sections.locator("a")).toHaveCount(3);
     }
   });
 });

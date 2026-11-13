@@ -1,0 +1,71 @@
+---
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+import Header from "../../../../components/Header.astro";
+import { Badge } from "../../../../components/ui/badge";
+import { getCategories, getPostsByCategory } from "../../../../lib/taxonomy";
+import { ui } from "../../../../lib/i18n";
+
+export async function getStaticPaths() {
+  const categories = await getCategories("zh");
+  return categories.map((cat) => ({
+    params: { category: cat.slug },
+    props: { label: cat.label },
+  }));
+}
+
+const { category } = Astro.params;
+const { label } = Astro.props;
+const labels = ui.zh;
+const posts = await getPostsByCategory(category!, "zh");
+---
+
+<BaseLayout
+  title={label}
+  description={`${label} 分类下的文章。`}
+  lang="zh-CN"
+  translations={{ en: `/categories/${category}/` }}
+>
+  <div class="flex flex-col min-h-screen">
+    <Header />
+    <main class="flex-1 mx-auto max-w-2xl w-full px-6 py-16">
+      <nav class="text-sm text-muted-foreground mb-4">
+        <a href="/zh/categories/" class="hover:text-foreground transition-colors no-underline">
+          {labels.categories}
+        </a>
+        <span class="mx-1.5">/</span>
+        <span class="text-foreground">{label}</span>
+      </nav>
+
+      <h1
+        class="text-foreground leading-tight"
+        style="font-size: var(--nb-h1-size); font-weight: var(--nb-h1-weight); letter-spacing: var(--nb-h1-tracking);"
+      >
+        {label}
+      </h1>
+      <p class="mt-2 text-[1.0625rem] text-muted-foreground leading-relaxed">
+        {labels.postCount(posts.length)}
+      </p>
+
+      <div class="mt-8 flex flex-col gap-4">
+        {posts.map((post) => (
+          <a
+            href={post.slug}
+            class="block rounded-lg border border-border p-4 transition-colors hover:border-border-strong no-underline"
+          >
+            <div class="font-medium text-foreground">{post.title}</div>
+            {post.description && (
+              <div class="mt-0.5 text-sm text-muted-foreground">{post.description}</div>
+            )}
+            {post.tags.length > 0 && (
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                {post.tags.map((tag) => (
+                  <Badge text={tag} size="small" />
+                ))}
+              </div>
+            )}
+          </a>
+        ))}
+      </div>
+    </main>
+  </div>
+</BaseLayout>

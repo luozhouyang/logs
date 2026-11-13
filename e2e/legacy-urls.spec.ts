@@ -28,12 +28,22 @@ test.describe("Legacy blog URLs", () => {
   });
 });
 
-test.describe("Feed", () => {
-  test("serves an RSS feed with the posts", async ({ request }) => {
+test.describe("Feeds", () => {
+  test("serves an English feed at /rss.xml", async ({ request }) => {
     const res = await request.get("/rss.xml");
     expect(res.status()).toBe(200);
     const body = await res.text();
-    expect(body).toContain("<title>Kong Gateway介绍</title>");
-    expect(body).toContain("在Docker部署Kong Gateway");
+    expect(body).toContain("<title>Kong Gateway introduction</title>");
+    expect(body).toContain("Deploying Kong Gateway with Docker");
+    // English feed, so the Chinese originals stay out of it.
+    expect(body).not.toContain("在Docker部署Kong Gateway");
+  });
+
+  test("serves a Chinese feed at /zh/rss.xml", async ({ request }) => {
+    const res = await request.get("/zh/rss.xml");
+    expect(res.status()).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("<title>在Docker部署Kong Gateway</title>");
+    expect(body).not.toContain("Deploying Kong Gateway with Docker");
   });
 });

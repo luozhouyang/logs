@@ -1,17 +1,22 @@
 ---
+/**
+ * English post page — the default locale, served at the site root.
+ *
+ * Navigation is built by `lib/blog-nav` rather than Nimbus's sidebar helpers
+ * so both locales render the same tree from the same code; Nimbus's helpers
+ * only know how to prefix a *version* mount, not a second locale.
+ */
 import DocsLayout from "../layouts/DocsLayout.astro";
 import {
   getDocsStaticPaths,
   getDocsPageProps,
   getRouteFlags,
-  getSidebar,
-  getPrevNext,
-  getBreadcrumbs,
-  getEditUrl,
-  getLastUpdated,
   getTOC,
+  getLastUpdated,
 } from "@cloudflare/nimbus-docs";
 import { components } from "../components";
+import { buildBreadcrumbs, buildNav, findPrevNext, translationsFor } from "../lib/blog-nav";
+import { ui } from "../lib/i18n";
 
 export const prerender = true;
 export const getStaticPaths = getDocsStaticPaths;
@@ -19,30 +24,20 @@ export const getStaticPaths = getDocsStaticPaths;
 const { entry, Content, headings } = await getDocsPageProps(Astro);
 
 const currentSlug = Astro.url.pathname.replace(/\/$/, "") || "/";
-
 const { sidebar: sidebarOn, tableOfContents: tocOn } = await getRouteFlags(entry);
 
-const sidebar = sidebarOn
-  ? await getSidebar(currentSlug, { collection: entry.collection })
-  : false;
-const prevNext = await getPrevNext(currentSlug, {
-  sidebarTree: sidebar === false ? [] : sidebar,
-  overrides: { prev: entry.data.prev, next: entry.data.next },
-});
-// Pass `collection` so versioned pages (docs-<v>) get version-prefixed
-// breadcrumb hrefs — parity with the getSidebar call above.
-const breadcrumbs = await getBreadcrumbs(currentSlug, { collection: entry.collection });
-const editUrl = await getEditUrl(entry);
-// Frontmatter wins; git is the fallback.
-const lastUpdated = entry.data.lastUpdated ?? await getLastUpdated(entry);
-// `tocOn` already implies `tableOfContents !== false`, but TS can't carry
-// that boolean narrowing to the value here — re-check it so `getTOC` only
-// ever sees its options object (or undefined), never `false`.
+const sidebar = sidebarOn ? await buildNav("en", currentSlug) : false;
+const prevNext = findPrevNext(Array.isArray(sidebar) ? sidebar : [], currentSlug);
+const breadcrumbs = buildBreadcrumbs("en", entry, ui.en.home);
+
 const tocConfig = entry.data.tableOfContents;
 const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
-const markdownPath = `/${entry.id}/index.md`;
-const markdownUrl = Astro.site ? new URL(markdownPath, Astro.site).href : markdownPath;
+
+// Frontmatter wins; git is the fallback.
+const lastUpdated = entry.data.lastUpdated ?? (await getLastUpdated(entry));
+const markdownUrl = `/${entry.id}/index.md`;
 const socialImage = entry.data.socialImage ?? `/og/${entry.id}.png`;
+const translations = await translationsFor("en", entry.id);
 ---
 
 <DocsLayout
@@ -61,12 +56,12 @@ const socialImage = entry.data.socialImage ?? `/og/${entry.id}.png`;
   socialImage={socialImage}
   lastUpdated={lastUpdated}
   published={entry.data.date}
-  lang={entry.data.lang}
-  editUrl={editUrl}
   draft={entry.data.draft}
   audience={entry.data.audience}
   collection={entry.collection}
   entryId={entry.id}
+  lang={entry.data.lang ?? "en"}
+  translations={translations}
 >
   <Content components={components} />
 </DocsLayout>

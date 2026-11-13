@@ -3,14 +3,37 @@ import { Icon } from "astro-icon/components";
 import { cn } from "@/lib/cn";
 import type { HTMLAttributes } from "astro/types";
 
+interface PageActionLabels {
+  published: string;
+  updated: string;
+  copyPage: string;
+  copied: string;
+  copyError: string;
+  viewAsMarkdown: string;
+  dateLocale: string;
+}
+
 interface Props extends HTMLAttributes<"div"> {
   markdownUrl?: string;
   lastUpdated?: Date;
   /** Authored publication date. Shown before `lastUpdated` when both exist. */
   published?: Date;
+  /** UI strings; English defaults so the component works standalone. */
+  labels?: Partial<PageActionLabels>;
 }
 
-const { markdownUrl, lastUpdated, published, class: className, ...attrs } = Astro.props;
+const { markdownUrl, lastUpdated, published, labels = {}, class: className, ...attrs } = Astro.props;
+
+const t = {
+  published: "Published",
+  updated: "Updated",
+  copyPage: "Copy page",
+  copied: "Copied",
+  copyError: "Couldn't copy",
+  viewAsMarkdown: "View as Markdown",
+  dateLocale: "en-US",
+  ...labels,
+};
 
 // Calendar dates are authored as date-only strings (UTC midnight) — format in
 // UTC so the day the author wrote never shifts for readers in other zones.
@@ -24,8 +47,8 @@ const dateFormat: Intl.DateTimeFormatOptions = {
 const baseBtn =
   "inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-transparent px-2 py-1 text-muted-foreground no-underline transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2";
 
-const formattedDate = lastUpdated ? new Intl.DateTimeFormat(undefined, dateFormat).format(lastUpdated) : null;
-const formattedPublished = published ? new Intl.DateTimeFormat(undefined, dateFormat).format(published) : null;
+const formattedDate = lastUpdated ? new Intl.DateTimeFormat(t.dateLocale, dateFormat).format(lastUpdated) : null;
+const formattedPublished = published ? new Intl.DateTimeFormat(t.dateLocale, dateFormat).format(published) : null;
 // Avoid "Published X | Updated X" noise: a post that never changed only shows
 // its publication date.
 const showUpdated =
@@ -38,20 +61,23 @@ const showUpdated =
   <div
     data-nb-page-actions
     data-md-url={markdownUrl}
+    data-label-copy-page={t.copyPage}
+    data-label-copied={t.copied}
+    data-label-copy-error={t.copyError}
     class={cn("not-prose -ml-2 flex flex-wrap items-center gap-y-1 text-[0.8125rem]", className)}
     {...attrs}
   >
     {published && (
       <span class="inline-flex items-center gap-1.5 px-2 py-1 text-muted-foreground">
         <Icon name="ph:calendar-blank" class="w-3.5 h-3.5" />
-        Published <time datetime={published.toISOString()}>{formattedPublished}</time>
+        {t.published} <time datetime={published.toISOString()}>{formattedPublished}</time>
       </span>
     )}
 
     {showUpdated && lastUpdated && (
       <span class="inline-flex items-center gap-1.5 px-2 py-1 text-muted-foreground">
         <Icon name="ph:clock" class="w-3.5 h-3.5" />
-        Updated <time datetime={lastUpdated.toISOString()}>{formattedDate}</time>
+        {t.updated} <time datetime={lastUpdated.toISOString()}>{formattedDate}</time>
       </span>
     )}
 
@@ -64,7 +90,7 @@ const showUpdated =
         <button type="button" data-nb-page-actions-copy class={baseBtn}>
           <Icon name="ph:copy" class="w-3.5 h-3.5" data-nb-page-actions-copy-icon is:inline />
           <Icon name="ph:check" class="hidden w-3.5 h-3.5 text-success" data-nb-page-actions-check-icon is:inline />
-          <span data-nb-page-actions-label aria-live="polite">Copy page</span>
+          <span data-nb-page-actions-label aria-live="polite">{t.copyPage}</span>
         </button>
 
         <span aria-hidden="true" class="select-none text-muted-foreground/40">|</span>
@@ -76,7 +102,7 @@ const showUpdated =
           class={baseBtn}
         >
           <Icon name="ph:markdown-logo" class="w-3.5 h-3.5" />
-          View as Markdown
+          {t.viewAsMarkdown}
         </a>
       </>
     )}

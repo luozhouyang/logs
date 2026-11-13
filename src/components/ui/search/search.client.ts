@@ -8,6 +8,16 @@ export interface SearchConfig {
   emptyState: HTMLElement;
   provider: SearchProvider;
   onNavigate?: () => void;
+  /** Client-rendered copy, from the dialog's data attributes. */
+  labels?: Partial<SearchLabels>;
+}
+
+export interface SearchLabels {
+  empty: string;
+  searching: string;
+  noResults: string;
+  unavailable: string;
+  buildHint: string;
 }
 
 export interface SearchInstance {
@@ -17,6 +27,15 @@ export interface SearchInstance {
 
 export function initSearch(config: SearchConfig): SearchInstance {
   const { input, resultsContainer, emptyState, provider, onNavigate } = config;
+
+  const labels: SearchLabels = {
+    empty: "Type to search…",
+    searching: "Searching…",
+    noResults: "No results found.",
+    unavailable: "Search is temporarily unavailable.",
+    buildHint: "Search is available after a production build.",
+    ...config.labels,
+  };
 
   let initialized = false;
   let activeIndex = -1;
@@ -103,7 +122,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
       initialized = true;
       return true;
     } catch {
-      emptyState.textContent = "Search is available after a production build.";
+      emptyState.textContent = labels.buildHint;
       return false;
     }
   }
@@ -114,7 +133,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
     const signal = activeController.signal;
 
     emptyState.style.display = "";
-    emptyState.textContent = "Searching…";
+    emptyState.textContent = labels.searching;
     clearResults();
 
     if (!(await ensureInitialized()) || signal.aborted) return;
@@ -128,7 +147,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
 
       if (results.length === 0) {
         emptyState.style.display = "";
-        emptyState.textContent = "No results found.";
+        emptyState.textContent = labels.noResults;
         return;
       }
 
@@ -139,7 +158,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
       if (signal.aborted) return;
       clearResults();
       emptyState.style.display = "";
-      emptyState.textContent = "Search is temporarily unavailable.";
+      emptyState.textContent = labels.unavailable;
     }
   }
 
@@ -151,7 +170,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
         activeController?.abort();
         clearResults();
         emptyState.style.display = "";
-        emptyState.textContent = "Type to search…";
+        emptyState.textContent = labels.empty;
         return;
       }
       void runSearch(query);
@@ -190,7 +209,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
       activeIndex = -1;
       clearResults();
       emptyState.style.display = "";
-      emptyState.textContent = "Type to search…";
+      emptyState.textContent = labels.empty;
       await ensureInitialized();
     },
     destroy() {
@@ -262,6 +281,13 @@ mount("[data-search-dialog]", (root) => {
     emptyState,
     provider,
     onNavigate: () => dialog.close(),
+    labels: {
+      empty: dialog.dataset.labelEmpty,
+      searching: dialog.dataset.labelSearching,
+      noResults: dialog.dataset.labelNoResults,
+      unavailable: dialog.dataset.labelUnavailable,
+      buildHint: dialog.dataset.labelBuildHint,
+    },
   });
 
   dialog.__openSearchDialog = () => {

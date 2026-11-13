@@ -4,22 +4,42 @@ A personal blog about Cloudflare, Kong Gateway, Docker, and self-hosting. It is
 built on [Cloudflare Nimbus](https://nimbus-docs.com) — the Astro-based docs
 framework — with Pagefind search and static hosting on Cloudflare Workers.
 
+## Languages
+
+English is the default locale and lives at the root. Chinese is mounted at
+`/zh/`. Each locale is a content collection:
+
+| Locale | Collection | Content | URLs |
+| :-- | :-- | :-- | :-- |
+| English (default) | `docs` | `src/content/docs/<section>/<slug>.mdx` | `/kong/introduction/` |
+| Chinese | `zh` | `src/content/zh/<section>/<slug>.mdx` | `/zh/kong/introduction/` |
+
+A translation is a file with the **same id** in the other collection; that is
+what pairs the pages for the language switcher and the `hreflang` alternates.
+Mark a translation with `translatedFrom: zh` (or `en`) in frontmatter so its
+provenance is explicit. A post that exists in only one language is fine — its
+switcher then sends readers to the other locale's home.
+
+Adding a language means adding it to `src/lib/i18n.ts` (base path, `<html lang>`,
+labels, UI strings) and registering its collection in `src/content.config.ts`;
+the routes under `src/pages/<locale>/` are thin copies of the root ones.
+
 ## Content
 
-Posts live in `src/content/docs/<section>/<slug>.mdx`. The section directory is
-the post's category (`/kong/introduction/` → category `kong`), and frontmatter
-`tags` drive `/tags/<tag>/` pages.
+Posts live in `src/content/<collection>/<section>/<slug>.mdx`. The section
+directory is the post's category (`/kong/introduction/` → category `kong`), and
+frontmatter `tags` drive `/tags/<tag>/` pages.
 
 ```mdx
 ---
-title: 在Docker部署Kong Gateway
-description: 在Docker上部署Kong Gateway并且提供安全的Kong Manager UI访问
-date: 2025-11-20          # first published (carried over from the old blog)
-lastUpdated: 2025-11-20   # optional; falls back to git history
-lang: zh-CN               # optional; defaults to the site locale (en)
+title: Deploying Kong Gateway with Docker
+description: Deploy Kong Gateway on Docker and secure Kong Manager UI access.
+date: 2025-11-20           # first published, carried over from the old blog
+lastUpdated: 2025-11-20    # optional; falls back to git history
 tags: [kong, docker]
 sidebar:
-  order: 1                # order within the section
+  order: 1                 # order within the section
+translatedFrom: zh         # translations only: this file is the English version
 ---
 ```
 
@@ -45,16 +65,20 @@ Posts used to live at `/blog/<slug>/`. Those paths are kept alive in the
 `redirects` map in `astro.config.ts` — add an entry there whenever a post moves,
 so old links (feeds, search results, other people's bookmarks) keep working.
 
-The feed is at `/rss.xml`, the sitemap at `/sitemap-index.xml`, and
-`/llms.txt` indexes the site for agents.
+Feeds are per locale: `/rss.xml` (English) and `/zh/rss.xml` (Chinese). The
+sitemap at `/sitemap-index.xml` covers both, and each language has its own
+agent index (`/llms.txt`, `/zh/llms.txt`) plus clean-markdown alternates at
+`<page>/index.md`.
 
 ## Search
 
-Search is Pagefind, configured by `pagefind.yml`. The blog is bilingual, and
-Pagefind would otherwise build one index per language and only query the one
-matching the current page — making Chinese posts invisible from English pages.
-`pagefind.yml` forces a single Chinese index so every post is findable from
-anywhere; English queries still work, without stemming.
+Search is Pagefind. It indexes per language (from each page's `<html lang>`
+and the search dialog queries the index for the page you're on: English pages
+search English posts, `/zh/` pages search Chinese posts.
+
+Framework chrome (table of contents, pagination, page actions, search dialog)
+is localized through `src/lib/ui-labels.ts`; components fall back to English
+when no labels are passed.
 
 ## Deployment
 

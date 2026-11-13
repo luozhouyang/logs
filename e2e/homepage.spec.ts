@@ -24,7 +24,7 @@ test.describe("Homepage", () => {
     await page.locator('main a[href="/categories/kong/"]').click();
     await expect(page).toHaveURL(/\/categories\/kong\/?$/);
     await expect(page.locator("h1")).toContainText("Kong");
-    await expect(page.locator('main a[href="/kong/introduction"]').first()).toBeVisible();
+    await expect(page.locator('main a[href="/kong/introduction/"]').first()).toBeVisible();
   });
 
   test("header shows site title and links back home", async ({ page }) => {

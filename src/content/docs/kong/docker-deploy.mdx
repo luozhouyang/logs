@@ -1,16 +1,16 @@
 ---
-title: "在Docker部署Kong Gateway"
-description: "在Docker上部署Kong Gateway并且提供安全的Kong Manager UI访问"
+title: "Deploying Kong Gateway with Docker"
+description: "Deploy Kong Gateway on Docker and secure Kong Manager UI access."
 date: 2025-11-20
-lang: zh-CN
 lastUpdated: 2025-11-20
 tags: [kong, docker]
 sidebar:
   order: 1
+translatedFrom: zh
 ---
-Kong官方的文档已经比较详细，读者应该优先参考官方文档。此文档主要用于个人记录，相当于一个备忘录，因此可能会缺失很多细节。
+Kong's official documentation is already fairly detailed, and readers should consult it first. This post is mainly a personal record, essentially a memo, so it may be missing a lot of detail.
 
-首先，部署Kong Gateway有很多种方式，本文使用的是最简单的一种：使用Docker手动部署容器。
+First, there are many ways to deploy Kong Gateway. This post uses the simplest one: deploying the containers manually with Docker.
 
 ## Network
 
@@ -20,7 +20,7 @@ docker network create kong-network
 
 ## Database
 
-这里采用本地部署Postgres容器的方式。
+Here we deploy a local Postgres container.
 
 ```bash
 docker volume create kong-database-volume
@@ -37,7 +37,7 @@ docker run -d \
 
 ```
 
-数据迁移：
+Run the database migrations:
 
 ```bash
 docker run --rm --network kong-network \
@@ -73,90 +73,90 @@ docker run -d \
 
 ```
 
-注意：为了能够通过公网域名访问Kong Manager，配置了以下环境变量：
+Note: the following environment variables are set so that Kong Manager can be reached through a public domain:
 * KONG_ADMIN_GUI_PATH=/manager
 * KONG_ADMIN_GUI_URL=http://yourdomain.com:8002/manager
 
-既然配额了域名，那么就必然要解决SSL证书的问题。Kong自带ACME插件，刚好可以给自己的域名颁发证书，并且能够自动刷新证书。
+Since we've configured a domain, we inevitably have to deal with the SSL certificate. Kong ships with the ACME plugin, which can issue a certificate for our own domain and refresh it automatically.
 
 
-通过浏览器访问：`http://yourdomain.com:8002/manager`即可进入Kong Manager的UI界面，方便配置Kong。 如图所示：
+Open `http://yourdomain.com:8002/manager` in a browser to reach the Kong Manager UI and configure Kong from there. As shown below:
 
 ![kong-manager](/images/kong-manager.png)
 
 
 ## ACME Plugin
 
-要利用ACME插件实现给域名颁发证书，主要有三个步骤：
-* 创建一个acme-service，是一个虚假的service，它部负责ACME Challenge等工作。
-* 创建一个acme-route，挂在上述acme-service下。
-* 创建一个acme-plugin，它是**全局的**，此插件实现了ACME的核心功能。
+Issuing a certificate for the domain with the ACME plugin involves three main steps:
+* Create an acme-service: a dummy service that handles the ACME Challenge and related work.
+* Create an acme-route attached to the acme-service above.
+* Create an acme-plugin. It is **global**, and this plugin implements the core ACME functionality.
 
 
 ### acme-service
 
 ![acme-service](/images/kong-acme-service.png)
 
-可以看到：
+As you can see:
 * host: localhost
 * port: 65535
 
-都是无意义的值。
+Both are meaningless values.
 
 ### acme-route
 
 ![acme-route](/images/kong-acme-route.png)
 
-注意：
-* 取消勾选 **Strip Path**
+Note:
+* Uncheck **Strip Path**
 
 ### acme-plugin
 
 ![acme-plugin](/images/kong-acme-plugin.png)
 
 
-注意:
-* 你可以在`domains`选项添加一个或者多个域名
-* 或者你可以选择`Allow Any Domain`
+Note:
+* You can add one or more domains to the `domains` option
+* Or you can select `Allow Any Domain`
 
 
-至此，ACME插件配置完毕。
+At this point the ACME plugin is fully configured.
 
 
 ### Create SSL Certificate
 
-可以通过Kong Admin API来触发**证书生成**
+You can trigger **certificate generation** through the Kong Admin API:
 
 ```bash
 curl http://localhost:8001/acme -d host=yourdomain.com
 ```
 
-过几分钟你会看到如下输出:
+After a few minutes you will see output like this:
 
 ```bash
 {"message":"certificate for host yourdomain.com is created"}
 ```
 
 
-然后你可以在Kong Manager / Certificates 看到:
+Then under Kong Manager / Certificates you will see:
 
 ![acme-certificate](/images/kong-acme-certificate.png)
 
 
-## 实现Kong Manager域名的安全访问（SSL + Auth）
+## Securing Kong Manager access via domain (SSL + Auth)
 
-想要使用域名来访问Kong Manager,并且支持SSL安全访问，需要进行一些配置变更:
-* 修改Kong Gateway的环境变量
-* 创建Kong Manager Service & Route
-* 创建Kong Admin Service & Route
+To access Kong Manager through a domain with SSL, a few configuration changes are needed:
+* Change the Kong Gateway environment variables
+* Create the Kong Manager service & route
+* Create the Kong Admin service & route
 
 
-### 修改Kong Gateway的环境变量
+### Change the Kong Gateway environment variables
 
-* 修改`KONG_ADMIN_GUI_PATH`和`KONG_ADMIN_GUI_URL`配置
-* 修改`KONG_ADMIN_LISTEN`和`KONG_ADMIN_API_URL`配置
+* Change the `KONG_ADMIN_GUI_PATH` and `KONG_ADMIN_GUI_URL` settings
+* Change the `KONG_ADMIN_LISTEN` and `KONG_ADMIN_API_URL` settings
 
-举例:
+For example:
 ```bash
     -e "KONG_ADMIN_LISTEN=0.0.0.0:8001,0.0.0.0:443 ssl" \
     -e "KONG_ADMIN_GUI_PATH=/kong-manager" \
@@ -165,11 +165,11 @@ curl http://localhost:8001/acme -d host=yourdomain.com
 
 ```
 
-注意！！！ **修改完之后不要重新部署！！！** 需要等后续所有配置完成之后再来重新部署。
+Careful!!! **Do not redeploy after making the changes!!!** You need to wait until all of the following configuration is complete before redeploying.
 
-### 创建Kong Manager Service & Route
+### Create the Kong Manager service & route
 
-因为涉及到环境变量的变更,导致在浏览器通过Kong Manager UI来更改配置,可能会遇到垮域问题,所以直接用 Admin API来处理最方便:
+Because of the environment variable changes, editing configuration through the Kong Manager UI in the browser may run into cross-origin problems, so it is easiest to handle it directly with the Admin API:
 
 ```bash
 curl -X POST 'http://localhost:8001/services' \
@@ -245,7 +245,7 @@ response:
 ```
 
 
-### 创建Kong Admin Service & Route
+### Create the Kong Admin service & route
 
 create service:
 
@@ -327,95 +327,95 @@ response:
 }
 ```
 
-### 配置Kong Manager的认证插件
+### Configure the authentication plugins for Kong Manager
 
-我们使用的Kong Gateway是开源版本，Kong Manager也是开源版本，默认是没有访问控制的。在开启了域名访问的情况下（意味着公网可以访问），会非常危险。
+The Kong Gateway we use is the open-source edition, and Kong Manager is open-source as well, so by default there is no access control. With domain access enabled (which means the public internet can reach it), that is very dangerous.
 
-为此，我们可以这样解决：
-* 在服务器开启IP白名单，只有你的IP可以访问
-* 给Kong Manager增加认证插件
-
-
-服务器的IP访问控制，这里不提。我们重点讲解如何给Kong Manager增加认证机制。
-
-上述小节我们给kong manager & kong admin都创建了service & route，那么很自然的，我们的认证插件可以放在这两个service或者route上。考虑到可能会在service上增加routes,所以我们把认证插件放到service上，会安全一些。
-
-那么我们使用哪种认证插件会比较合适呢？我们这里使用**Basic Auth**，主要原因是：
-* 浏览器对于Basic Auth有很好的支持，会在需要认证的地方弹出Basic Auth认证表单，我们无需更改Kong Manager的任何UI
+To solve this, we can do the following:
+* Enable an IP allowlist on the server so that only your IP can access it
+* Add an authentication plugin to Kong Manager
 
 
-注意：**如果你在Kong Manager UI配置遇到问题，请转用Kong Admin API，它是万能的！！！**
+We won't cover IP access control on the server here. We will focus on how to add authentication to Kong Manager.
+
+In the previous sections we created services & routes for both kong manager & kong admin, so naturally our authentication plugins can go on these two services or routes. Since routes may be added to a service later, putting the authentication plugin on the service is a bit safer.
+
+So which authentication plugin is the best fit? We use **Basic Auth** here, mainly because:
+* Browsers support Basic Auth well and pop up the Basic Auth form wherever authentication is needed, so we don't have to change any part of the Kong Manager UI
 
 
-#### 配置Basic Auth插件
+Note: **if you run into problems configuring things in the Kong Manager UI, switch to the Kong Admin API — it can do anything!!!**
 
-给Kong Manager Service配置Basic Auth插件：
+
+#### Configure the Basic Auth plugin
+
+Add the Basic Auth plugin to the Kong Manager service:
 ![kong-manager-basicauth](/images/kong-manager-basicauth.png)
 
 
-给Kong Admin Service配置Basic Auth插件：
+Add the Basic Auth plugin to the Kong Admin service:
 ![kong-admin-basicauth](/images/kong-admin-basicauth.png)
 
 
-#### 配置ACL插件
+#### Configure the ACL plugin
 
-仅仅拥有Basic Auth插件是不够的，因为只要Kong上有其他地方也有Basic Auth的Credentials，那么也会可以登陆&访问Kong Manager，这实际上是一种越权。为了避免这在情况，我们还需要ACL插件，来控制哪些Basic Auth的Credentials可以访问Kong Manager。
+The Basic Auth plugin alone is not enough, because as long as Basic Auth credentials exist anywhere else in Kong, those credentials can also log in and access Kong Manager, which is effectively a privilege escalation. To avoid this, we also need the ACL plugin to control which Basic Auth credentials can access Kong Manager.
 
-给Kong Manager Service配置ACL插件：
+Add the ACL plugin to the Kong Manager service:
 ![kong-manager-acl](/images/kong-manager-acl.png)
 
 
-给Kong Admin Service配置ACL插件：
+Add the ACL plugin to the Kong Admin service:
 ![kong-admin-acl](/images/kong-admin-acl.png)
 
-这里ACL插件的**Allow**就是**Group Name**，我们稍后会在Consumer里配置。
+The ACL plugin's **Allow** value here is the **Group Name**, which we will configure on the Consumer shortly.
 
 
-#### 配置Kong Manager Consumer
+#### Configure the Kong Manager Consumer
 
-我们新建一个Kong Manager专用的Consumer，来给Basic Auth认证一个独立可以区分的身份。
+We create a new Consumer dedicated to Kong Manager, giving Basic Auth authentication a separate, distinguishable identity.
 
 ![kong-manager-consumer](/images/kong-manager-consumer.png)
 
-然后，我们给这个Consumer添加具体的Credentials：
-* 配置Basic Auth Credentials,只有在配置了Basic Auth插件的情况下才可以配置Basic Auth Credentials
-* 配置ACL Credentials，只有在配置了ACL插件的情况下才可以配置ACL Credentials
+Then we add the actual credentials to this Consumer:
+* Configure Basic Auth Credentials; these can only be configured when the Basic Auth plugin is enabled
+* Configure ACL Credentials; these can only be configured when the ACL plugin is enabled
 
 ![kong-manager-consumer-credentials](/images/kong-manager-consumer-credentials.png)
 
 
 
-配置ACL Credentials:
+Configure the ACL Credentials:
 ![kong-manager-consumer-credentials-acl](/images/kong-manager-consumer-credentials-acl.png)
 
-注意这里的**Group Name**要和插件保持一致。
+Note that the **Group Name** here must match the plugin.
 
 
-配置Basic Auth Credentials:
+Configure the Basic Auth Credentials:
 ![kong-manager-consumer-credentials-basicauth](/images/kong-manager-consumer-credentials-basicauth.png)
 
-Usernamee & Password自己随意设置，保证安全性即可。
+Set Username & Password to whatever you like, as long as it stays secure.
 
 
-配置完Consumer Credentials之后，可以看到列表：
+After configuring the Consumer Credentials, the list looks like this:
 ![kong-manager-consumer-credentials-all](/images/kong-manager-consumer-credentials-all.png)
 
 
-#### 开启Service下的插件
+#### Enable the plugins on the services
 
-开启插件即可，包括Kong Manager & Kong Admin Service。
-
-
-#### 重新部署Kong Gateway
-
-至此，所有配置更新完毕，重新部署Kong Gateway，以便让环境变量生效。
+Just enable the plugins, for both the Kong Manager & Kong Admin services.
 
 
-浏览器访问：https://kong.yourdomain.com/kong-manager
+#### Redeploy Kong Gateway
 
-会弹出Basic Auth 认证表单：
+All configuration is now updated. Redeploy Kong Gateway so that the environment variables take effect.
+
+
+Visit in a browser: https://kong.yourdomain.com/kong-manager
+
+The Basic Auth login form will pop up:
 ![kong-manager-basicauth-form](/images/kong-manager-basicauth-form.png)
 
 
-输入之前设置的Username & Password即可进入Kong Manager UI。
+Enter the Username & Password you set earlier to get into the Kong Manager UI.
 

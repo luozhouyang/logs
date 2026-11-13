@@ -36,7 +36,22 @@
     "/tags/smtp",
     "/tags/stripe",
     "/tags/workers",
-    "/tags/wrangler"
+    "/tags/wrangler",
+    "/zh",
+    "/zh/categories",
+    "/zh/categories/cloudflare",
+    "/zh/categories/kong",
+    "/zh/cloudflare/r2-image-hosting",
+    "/zh/cloudflare/wrangler-tips",
+    "/zh/kong/docker-deploy",
+    "/zh/kong/introduction",
+    "/zh/tags",
+    "/zh/tags/api-gateway",
+    "/zh/tags/cloudflare",
+    "/zh/tags/docker",
+    "/zh/tags/kong",
+    "/zh/tags/r2",
+    "/zh/tags/wrangler"
   ],
   "opaqueNamespaces": []
 }

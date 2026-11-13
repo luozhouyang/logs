@@ -3,9 +3,9 @@ import { test, expect } from "@playwright/test";
 test.describe("Docs pages", () => {
   test("renders doc page with title, description, and content", async ({ page }) => {
     await page.goto("/kong/introduction");
-    await expect(page.locator("h1")).toContainText("Kong Gateway介绍");
+    await expect(page.locator("h1")).toContainText("Kong Gateway introduction");
     await expect(page.locator("article.docs-content")).toBeVisible();
-    await expect(page.locator("article")).toContainText("云原生的API Gateway");
+    await expect(page.locator("article")).toContainText("cloud-native API Gateway");
   });
 
   test("shows breadcrumbs", async ({ page }) => {
@@ -20,8 +20,8 @@ test.describe("Docs pages", () => {
     await page.goto("/kong/introduction");
     const sidebar = page.locator("#desktop-sidebar");
     await expect(sidebar).toBeVisible();
-    await expect(sidebar).toContainText("Kong Gateway介绍");
-    await expect(sidebar).toContainText("在Docker部署Kong Gateway");
+    await expect(sidebar).toContainText("Kong Gateway introduction");
+    await expect(sidebar).toContainText("Deploying Kong Gateway with Docker");
   });
 
   test("sidebar highlights active page", async ({ page, isMobile }) => {
@@ -29,7 +29,7 @@ test.describe("Docs pages", () => {
     await page.goto("/kong/introduction");
     const activeLink = page.locator("#desktop-sidebar a[aria-current='page']");
     await expect(activeLink).toBeVisible();
-    await expect(activeLink).toContainText("Kong Gateway介绍");
+    await expect(activeLink).toContainText("Kong Gateway introduction");
   });
 
   test("shows table of contents on desktop", async ({ page, isMobile }) => {
