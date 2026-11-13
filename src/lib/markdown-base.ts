@@ -7,12 +7,7 @@
  * this pass prefixes them at build time.
  */
 
-interface HastElement {
-  type: string;
-  tagName?: string;
-  properties?: Record<string, unknown>;
-  children?: HastElement[];
-}
+import type { Element } from "hast";
 
 const URL_ATTRIBUTE: Record<string, string> = {
   img: "src",
@@ -28,7 +23,7 @@ export function baseContentUrls(base: string) {
     name: "nimbus:base-content-urls",
     element: {
       filter: Object.keys(URL_ATTRIBUTE),
-      visit(node: HastElement) {
+      visit(node: Element): Element | undefined {
         if (!prefix || !node.tagName) return;
         const attribute = URL_ATTRIBUTE[node.tagName];
         const value = node.properties?.[attribute];
@@ -39,7 +34,7 @@ export function baseContentUrls(base: string) {
         return {
           ...node,
           properties: { ...node.properties, [attribute]: `${prefix}${value}` },
-        };
+        } as Element;
       },
     },
   };

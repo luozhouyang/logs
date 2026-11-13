@@ -5,8 +5,9 @@ import { LinkButton } from "./ui/link-button";
 import { ThemeToggle } from "./ui/theme-toggle";
 import { SearchTrigger } from "./ui/search";
 import { config } from "virtual:nimbus/config";
-import { locales, localeHome, otherLocale, parseLocale, ui, type TranslationLinks } from "../lib/i18n";
-import { chrome } from "../lib/ui-labels";
+import { getCollection } from "astro:content";
+import { localeHome, localePath, otherLocale, parseLocale, ui } from "../lib/i18n";
+import { stripBase } from "../lib/base";
 
 interface Props {
   /** Astro collection id for the current page, forwarded from DocsLayout. */
@@ -15,24 +16,34 @@ interface Props {
   entryId?: string;
   /**
    * Whether the page has a sidebar to open. When `false`, the mobile
-   * menu button is hidden — pages that opted out via `sidebar: false`
-   * shouldn't show a button that opens an empty dialog. Default `true`.
+   * menu button is hidden. Default `true`.
    */
   showSidebar?: boolean;
-  /** Where this page lives in the other locale, for the language link. */
-  translations?: TranslationLinks;
 }
 
-// `entryId` is part of Props as a forward-compat hook (the version-switcher
-// recipe reads it) but the base Header doesn't use it — leave it off the
-// destructure to avoid an unused-var warning.
-const { showSidebar = true, translations } = Astro.props;
+const { showSidebar = true } = Astro.props;
 
+// ---- Locale switch (the only non-stock addition to this component) ---------
+// The header otherwise matches the Nimbus starter: no section tabs, title,
+// search, GitHub, theme toggle, mobile menu.
 const locale = parseLocale(Astro.url.pathname);
+const alternate = otherLocale(locale);
 const labels = ui[locale];
-const chromeLabels = chrome(locale);
-const alternateLocale = otherLocale(locale);
-const alternateHref = translations?.[alternateLocale] ?? localeHome(alternateLocale);
+
+// Link the translated post when both collections carry the same entry id;
+// otherwise fall back to the other locale's home.
+const route = stripBase(Astro.url.pathname).replace(/\/+$/, "");
+const withoutLocale = route === "/zh" ? "/" : route.replace(/^\/zh(\/|$)/, "/");
+const entryId = withoutLocale.replace(/^\/+|\/+$/g, "");
+
+let alternateHref = localeHome(alternate);
+if (entryId) {
+  const collection = alternate === "zh" ? "zh" : "docs";
+  const entries = await getCollection(collection).catch(() => []);
+  if (entries.some((entry) => entry.id === entryId)) {
+    alternateHref = localePath(alternate, `/${entryId}/`);
+  }
+}
 ---
 
 <header class="sticky top-0 z-30 border-b border-border bg-card/80 backdrop-blur-lg">
@@ -43,22 +54,19 @@ const alternateHref = translations?.[alternateLocale] ?? localeHome(alternateLoc
           {config.title}
         </span>
       </a>
-
     </div>
 
     <div class="flex items-center gap-2">
-      {config.search !== false && (
-        <SearchTrigger label={chromeLabels.searchLabel} ariaLabel={chromeLabels.searchAria} />
-      )}
+      {config.search !== false && <SearchTrigger />}
 
       <a
         href={alternateHref}
-        hreflang={locales[alternateLocale].htmlLang}
-        lang={locales[alternateLocale].htmlLang}
+        hreflang={alternate === "zh" ? "zh-CN" : "en"}
+        lang={alternate === "zh" ? "zh-CN" : "en"}
         aria-label={labels.switchToLabel}
         title={labels.switchToLabel}
         class="inline-flex h-7 items-center rounded-md border border-border px-2 text-[0.75rem] font-medium text-muted-foreground no-underline transition-colors hover:bg-accent hover:text-foreground"
-        data-lang-switch={alternateLocale}
+        data-lang-switch={alternate}
       >
         {labels.switchTo}
       </a>
@@ -84,7 +92,7 @@ const alternateHref = translations?.[alternateLocale] ?? localeHome(alternateLoc
           shape="square"
           size="sm"
           icon="ph:list"
-          aria-label={chromeLabels.navigation}
+          aria-label="Open navigation"
           data-menu-btn
           class="lg:hidden text-muted-foreground"
         />

@@ -149,8 +149,6 @@ const json = JSON.stringify(terminalData).replace(/</g, "\\u003c");
 <BaseLayout
   title={config.title}
   description={intro}
-  lang={isZh ? "zh-CN" : "en"}
-  translations={isZh ? { en: "/" } : { zh: "/zh/" }}
 >
   <div class="flex min-h-screen flex-col">
     <Header />

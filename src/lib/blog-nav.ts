@@ -6,8 +6,7 @@
  * (`zh`) derive their navigation here. Shapes match the Nimbus components, so
  * `Sidebar`, `Pagination` and `Breadcrumbs` render them unchanged.
  */
-import { getCollection } from "astro:content";
-import { categoryLabel, localePath, type Locale, type TranslationLinks } from "./i18n";
+import { categoryLabel, localePath, type Locale } from "./i18n";
 import { getCategoryFromId, loadEntries } from "./content";
 
 export interface NavLink {
@@ -136,25 +135,4 @@ export function buildBreadcrumbs(
     },
     { label: entry.data.title },
   ];
-}
-
-/**
- * Where this entry exists in other locales, keyed by locale, as site paths.
- * Translations share the entry id across collections (`kong/introduction`).
- */
-export async function translationsFor(
-  locale: Locale,
-  id: string,
-): Promise<TranslationLinks> {
-  const others: Locale[] = locale === "en" ? ["zh"] : ["en"];
-  const links: TranslationLinks = {};
-
-  for (const other of others) {
-    const collection = other === "zh" ? "zh" : "docs";
-    const entries = await getCollection(collection);
-    const match = entries.find((entry) => entry.id === id && !entry.data.draft);
-    if (match) links[other] = localePath(other, `/${id}/`);
-  }
-
-  return links;
 }

@@ -63,10 +63,11 @@ test.describe("Docs pages", () => {
     await expect(img).toHaveAttribute("src", /\/images\//);
   });
 
-  test("shows the authored publication date", async ({ page }) => {
+  test("shows the last-updated date", async ({ page }) => {
     await page.goto(url("/kong/introduction"));
     const actions = page.locator("[data-nb-page-actions]");
-    await expect(actions).toContainText("Published");
+    // Stock PageActions renders "Updated <date>".
+    await expect(actions).toContainText("Updated");
     await expect(actions.locator("time").first()).toHaveAttribute(
       "datetime",
       /^2025-07-29/,

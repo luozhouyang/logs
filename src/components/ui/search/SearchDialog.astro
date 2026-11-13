@@ -1,44 +1,9 @@
 ---
 import { Icon } from "astro-icon/components";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
-
-interface Props {
-  ariaLabel?: string;
-  placeholder?: string;
-  empty?: string;
-  /** Client-rendered states. Travel to the browser as data attributes. */
-  searching?: string;
-  noResults?: string;
-  unavailable?: string;
-  buildHint?: string;
-  navigate?: string;
-  select?: string;
-  closeHint?: string;
-}
-
-const {
-  ariaLabel = "Search documentation",
-  placeholder = "Search documentation…",
-  empty = "Type to search…",
-  searching = "Searching…",
-  noResults = "No results found.",
-  unavailable = "Search is temporarily unavailable.",
-  buildHint = "Search is available after a production build.",
-  navigate = "↑↓ navigate",
-  select = "↵ select",
-  closeHint = "Esc close",
-} = Astro.props;
 ---
 
-<Dialog
-  aria-label={ariaLabel}
-  data-search-dialog
-  data-label-empty={empty}
-  data-label-searching={searching}
-  data-label-no-results={noResults}
-  data-label-unavailable={unavailable}
-  data-label-build-hint={buildHint}
->
+<Dialog aria-label="Search documentation" data-search-dialog>
   <DialogContent class="max-w-xl bg-muted shadow-xl ring-border">
     <div class="overflow-hidden rounded-t-lg bg-card border-b border-border">
       <div class="flex items-center gap-3 border-b border-border px-4 py-3">
@@ -51,7 +16,7 @@ const {
           aria-autocomplete="list"
           aria-controls="search-listbox"
           type="text"
-          placeholder={placeholder}
+          placeholder="Search documentation…"
           class="min-w-0 flex-1 border-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           autocomplete="off"
           spellcheck="false"
@@ -71,15 +36,15 @@ const {
         class="min-h-40 overflow-y-auto p-2"
       >
         <p data-search-empty class="py-8 text-center text-sm text-muted-foreground">
-          {empty}
+          Type to search…
         </p>
       </div>
     </div>
 
     <div class="flex items-center gap-4 px-4 py-2.5 text-xs text-muted-foreground/80">
-      <span>{navigate}</span>
-      <span>{select}</span>
-      <span>{closeHint}</span>
+      <span>↑↓ navigate</span>
+      <span>↵ select</span>
+      <span>Esc close</span>
     </div>
   </DialogContent>
 </Dialog>

@@ -9,9 +9,10 @@ test.describe("Locales", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
     await expect(page.locator("h1")).toContainText("在Docker部署Kong Gateway");
     await expect(page.locator("article")).toContainText("Kong官方的文档");
-    // The chrome is localized too, not just the post body.
-    await expect(page.locator("nav[aria-label='面包屑导航']")).toBeVisible();
-    await expect(page.locator(".toc-container h2")).toHaveText("本页目录");
+    // Chrome is stock Nimbus (English) — only the content and <html lang>
+    // follow the locale.
+    await expect(page.locator("nav[aria-label='Breadcrumb']")).toBeVisible();
+    await expect(page.locator(".toc-container h2")).toHaveText("On this page");
   });
 
   test("English post is the default at the root", async ({ page }) => {
@@ -31,14 +32,6 @@ test.describe("Locales", () => {
     await page.locator("[data-lang-switch='en']").click();
     await expect(page).toHaveURL(/\/kong\/introduction\/?$/);
     await expect(page.locator("h1")).toContainText("Kong Gateway introduction");
-  });
-
-  test("pages announce hreflang alternates", async ({ page }) => {
-    await page.goto(url("/kong/introduction/"));
-    await expect(
-      page.locator("link[rel='alternate'][hreflang='zh-CN']"),
-    ).toHaveAttribute("href", /\/zh\/kong\/introduction\/$/);
-    await expect(page.locator("link[rel='alternate'][hreflang='x-default']")).toHaveCount(1);
   });
 
   test("a post with no translation sends the switcher to the other home", async ({

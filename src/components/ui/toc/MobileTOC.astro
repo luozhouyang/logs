@@ -18,19 +18,9 @@ import type { TOCItem } from "@cloudflare/nimbus-docs/types";
 
 interface Props extends HTMLAttributes<"nav"> {
   headings: TOCItem[];
-  label?: string;
-  jumpLabel?: string;
-  overview?: string;
 }
 
-const {
-  headings,
-  label = "On this page",
-  jumpLabel = "Jump to section",
-  overview = "Overview",
-  class: className,
-  ...attrs
-} = Astro.props;
+const { headings, class: className, ...attrs } = Astro.props;
 
 const hasHeadings = headings.length > 0;
 ---
@@ -39,16 +29,16 @@ const hasHeadings = headings.length > 0;
   hasHeadings && (
     <nav
       data-nb-mobile-toc
-      aria-label={label}
+      aria-label="On this page"
       class={cn("relative", className)}
       {...attrs}
     >
       <select
         data-nb-mobile-toc-select
-        aria-label={jumpLabel}
+        aria-label="Jump to section"
         class="w-full appearance-none rounded-md border border-border bg-background py-2.5 pl-3 pr-9 text-sm font-medium text-foreground transition-colors hover:border-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
-        <option value="_top">{overview}</option>
+        <option value="_top">Overview</option>
         {headings.map((heading) => (
           <option value={heading.slug}>
             {`${" ".repeat(Math.max(0, heading.depth - 2))}${heading.text}`}

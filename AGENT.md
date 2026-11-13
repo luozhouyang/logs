@@ -22,15 +22,20 @@ site. The original posts were migrated from an Astro blog, so:
   delay (default 10s); tests shorten it.
 - **Translations share the entry id.** A translation is the same
   `<section>/<slug>` in the other collection — that pairing drives the language
-  switcher (`src/lib/blog-nav.ts`) and the `hreflang` alternates. Mark
-  translations with `translatedFrom: en|zh`.
+  switcher in `src/components/Header.astro`. Mark translations with
+  `translatedFrom: en|zh`.
 - **A missing translation is allowed.** The switcher falls back to the other
   locale's home; never duplicate a post just to fill the gap.
-- **Locale plumbing** lives in `src/lib/i18n.ts` (base path, `<html lang>`,
-  labels) and `src/lib/ui-labels.ts` (framework chrome strings). The `/zh`
-  routes mirror the root ones and build their own sidebar/breadcrumbs/prev-next
-  through `src/lib/blog-nav.ts`, because Nimbus's nav helpers only prefix docs
-  *versions*, not second locales.
+- **Locale plumbing** lives in `src/lib/i18n.ts` (paths, labels, `<html lang>`).
+  The `/zh` routes mirror the root ones and build their own
+  sidebar/breadcrumbs/prev-next through `src/lib/blog-nav.ts`, because Nimbus's
+  nav helpers only prefix docs *versions*, not second locales.
+- **Layouts and UI components stay stock.** Only three deviations are allowed:
+  the Header (no section tabs, language switch), the one line in BaseLayout
+  that sets `<html lang>` from the URL, and the search provider (`/logs`
+  prefix + dev fallback). Don't reintroduce localized chrome strings,
+  `published`/`translations` props, or hreflang emission — the framework owns
+  those.
 - **Extra frontmatter fields** are declared in `src/content.config.ts`:
   `tags`, `date` (first published, from the old `pubDate`), `lang` (rare
   per-page override), `translatedFrom`. `lastUpdated` is modelled by Nimbus and

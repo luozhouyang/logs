@@ -5,23 +5,15 @@ import "../styles/globals.css";
 import "../styles/prose.css";
 import { config } from "virtual:nimbus/config";
 import { getCollectionLlmsUrl, getVersionStatus } from "@cloudflare/nimbus-docs";
+import { parseLocale } from "@/lib/i18n";
 import AgentDirective from "@/components/AgentDirective.astro";
 import { SearchDialog } from "@/components/ui/search";
 import NimbusHead from "@cloudflare/nimbus-docs/components/NimbusHead.astro";
 import type { BasePageProps } from "@cloudflare/nimbus-docs/types";
-import { locales, localePath, parseLocale, type Locale, type TranslationLinks } from "@/lib/i18n";
-import { chrome } from "@/lib/ui-labels";
 
-type Props = BasePageProps & {
-  /** BCP 47 tag for this page's content. Defaults to the site locale. */
-  lang?: string;
-  /** Where this page lives in the other locale; drives hreflang alternates. */
-  translations?: TranslationLinks;
-};
+type Props = BasePageProps;
 
 const {
-  lang: pageLang,
-  translations,
   title,
   description,
   noindex,
@@ -33,28 +25,10 @@ const {
   entryId,
 } = Astro.props;
 
-// Posts are written in more than one language, so the document language is a
-// page concern: a Chinese post tagged `lang="zh-CN"` is what lets screen
-// readers, hyphenation, and the Pagefind index segment it correctly.
-const lang = pageLang ?? config.locale ?? "en";
-// The locale a page belongs to is its URL prefix, so the feed it advertises
-// and its alternates can be derived without every route passing a prop.
-const locale = parseLocale(Astro.url.pathname);
-
-// hreflang alternates, plus x-default pointing at the default locale. Only
-// emitted when the page actually exists in another language.
-const alternates = translations
-  ? (Object.entries(translations) as [Locale, string][]).filter(
-      ([, href]) => typeof href === "string" && href.length > 0,
-    )
-  : [];
-const siteUrl = Astro.site ?? new URL("https://luozhouyang.com");
-const xDefault =
-  alternates.length > 0
-    ? locale === "en"
-      ? Astro.url.pathname
-      : alternates.find(([other]) => other === "en")?.[1]
-    : undefined;
+// Thin locale adaptation (the only non-stock line in this layout): the site
+// has two locales embedded in the URL, so <html lang> follows the path instead
+// of being the same for every page. English is the default.
+const lang = parseLocale(Astro.url.pathname) === "zh" ? "zh-CN" : (config.locale ?? "en");
 // Per-page agent-index pointer. For pages in non-primary or version
 // collections, this resolves to `/<prefix>/llms.txt` (e.g. `/v0/llms.txt`
 // for a v0 docs page, `/blog/llms.txt` for a blog post). Falls back to
@@ -127,26 +101,6 @@ const llmsUrl = Astro.site
       collection={collection}
       entryId={entryId}
     />
-    <!-- hreflang alternates: this page in every language that has one, plus
-         x-default for the default locale. -->
-    {alternates.map(([other, href]) => (
-      <link
-        rel="alternate"
-        hreflang={locales[other].htmlLang}
-        href={new URL(href, siteUrl).href}
-      />
-    ))}
-    {xDefault && (
-      <link rel="alternate" hreflang="x-default" href={new URL(xDefault, siteUrl).href} />
-    )}
-    <!-- Feed discovery. The pre-Nimbus blog advertised one and readers may
-         still be subscribed; each locale has its own feed. -->
-    <link
-      rel="alternate"
-      type="application/rss+xml"
-      title={`${config.title} · RSS`}
-      href={localePath(locale, "/rss.xml")}
-    />
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
     <a
@@ -155,22 +109,9 @@ const llmsUrl = Astro.site
     >
       Skip to content
     </a>
-    {markdownUrl && !isHiddenVersion && <AgentDirective markdownUrl={markdownUrl} llmsUrl={llmsUrl} locale={locale} />}
+    {markdownUrl && !isHiddenVersion && <AgentDirective markdownUrl={markdownUrl} llmsUrl={llmsUrl} />}
     <slot />
-    {config.search !== false && (
-      <SearchDialog
-        ariaLabel={chrome(locale).searchAria}
-        placeholder={chrome(locale).searchPlaceholder}
-        empty={chrome(locale).searchEmpty}
-        searching={chrome(locale).searchSearching}
-        noResults={chrome(locale).searchNoResults}
-        unavailable={chrome(locale).searchUnavailable}
-        buildHint={chrome(locale).searchBuildHint}
-        navigate={chrome(locale).searchNavigate}
-        select={chrome(locale).searchSelect}
-        closeHint={chrome(locale).searchCloseHint}
-      />
-    )}
+    {config.search !== false && <SearchDialog />}
 
     <script>
       import { codeCopy, headingAnchors } from "@cloudflare/nimbus-docs/client";

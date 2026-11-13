@@ -6,13 +6,6 @@ function initPageActions(root: HTMLElement): () => void {
   const checkIcon = root.querySelector<SVGElement>("[data-nb-page-actions-check-icon]");
   const label = root.querySelector<HTMLSpanElement>("[data-nb-page-actions-label]");
   const mdUrl = root.dataset.mdUrl;
-  // Labels travel as data attributes so the same component works in any
-  // locale without shipping every language's strings to the client.
-  const labels = {
-    copyPage: root.dataset.labelCopyPage ?? "Copy page",
-    copied: root.dataset.labelCopied ?? "Copied",
-    copyError: root.dataset.labelCopyError ?? "Couldn't copy",
-  };
 
   if (!copyBtn || !mdUrl) return () => {};
 
@@ -23,15 +16,15 @@ function initPageActions(root: HTMLElement): () => void {
     if (state === "copied") {
       copyIcon.classList.add("hidden");
       checkIcon.classList.remove("hidden");
-      label.textContent = labels.copied;
+      label.textContent = "Copied";
     } else {
-      label.textContent = labels.copyError;
+      label.textContent = "Couldn't copy";
     }
     if (resetTimer) window.clearTimeout(resetTimer);
     resetTimer = window.setTimeout(() => {
       copyIcon.classList.remove("hidden");
       checkIcon.classList.add("hidden");
-      label.textContent = labels.copyPage;
+      label.textContent = "Copy page";
     }, 1500);
   }
 

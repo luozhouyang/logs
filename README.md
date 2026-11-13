@@ -20,7 +20,7 @@ English is the default locale and lives at the root. Chinese is mounted at
 | Chinese | `zh` | `src/content/zh/<section>/<slug>.mdx` | `/zh/kong/introduction/` |
 
 A translation is a file with the **same id** in the other collection; that is
-what pairs the pages for the language switcher and the `hreflang` alternates.
+what pairs the pages for the language switcher.
 Mark a translation with `translatedFrom: zh` (or `en`) in frontmatter so its
 provenance is explicit. A post that exists in only one language is fine — its
 switcher then sends readers to the other locale's home.
@@ -95,9 +95,19 @@ Pagefind only builds during `npm run build`. `astro dev` would otherwise have
 no index, so the provider falls back to `/search-index.json` — a build-time
 JSON index of every post in both locales. Production always uses Pagefind.
 
-Framework chrome (table of contents, pagination, page actions, search dialog)
-is localized through `src/lib/ui-labels.ts`; components fall back to English
-when no labels are passed.
+Layouts and UI components are the stock Nimbus starter files. The only
+departures, all invisible or structural:
+
+| File | Deviation |
+| :-- | :-- |
+| `src/components/Header.astro` | No section tab strip; adds the EN/中文 switch |
+| `src/layouts/BaseLayout.astro` | `<html lang>` follows the URL locale |
+| `src/components/ui/search/providers/pagefind.ts` | `/logs` prefix on results + dev fallback |
+| `src/components/HomePage.astro` | The landing page is the terminal |
+
+Chrome copy (TOC, pagination, search dialog, breadcrumbs) is the framework's
+English default on both locales; only post content and `<html lang>` follow
+the locale.
 
 ## Deployment
 

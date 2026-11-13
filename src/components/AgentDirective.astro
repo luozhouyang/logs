@@ -1,34 +1,16 @@
 ---
-import type { Locale } from "@/lib/i18n";
-
 interface Props {
   /** Absolute or site-relative URL for this page's markdown version. */
   markdownUrl: string;
   /** Absolute or site-relative URL for the top-level llms.txt index. */
   llmsUrl: string;
-  /** Language of the directive. Screen-reader only, but agents read it too. */
-  locale?: Locale;
 }
 
-const { markdownUrl, llmsUrl, locale = "en" } = Astro.props;
-
-const copy =
-  locale === "zh"
-    ? {
-        lead: "本页提供 Markdown 版本，推荐用于 AI 读取。查看",
-        mid: "获取本页内容，或访问",
-        tail: "查看完整文档索引。",
-      }
-    : {
-        lead: "This page is available in Markdown format. Markdown is recommended for AI consumption. See",
-        mid: "for this page, or",
-        tail: "for the full documentation index.",
-      };
+const { markdownUrl, llmsUrl } = Astro.props;
 ---
 
 <aside class="sr-only" data-ai-agent-directive>
-  {copy.lead} <a href={markdownUrl}>{markdownUrl}</a>
-  {copy.mid}
-  <a href={llmsUrl}>{llmsUrl}</a>
-  {copy.tail}
+  This page is available in Markdown format. Markdown is recommended for AI
+  consumption. See <a href={markdownUrl}>{markdownUrl}</a> for this page, or
+  <a href={llmsUrl}>{llmsUrl}</a> for the full documentation index.
 </aside>

@@ -6,17 +6,9 @@ import type { PrevNext } from "@cloudflare/nimbus-docs/types";
 
 interface Props extends HTMLAttributes<"nav"> {
   prevNext: PrevNext;
-  prevLabel?: string;
-  nextLabel?: string;
 }
 
-const {
-  prevNext,
-  prevLabel = "Previous",
-  nextLabel = "Next",
-  class: className,
-  ...attrs
-} = Astro.props;
+const { prevNext, class: className, ...attrs } = Astro.props;
 const { prev, next } = prevNext;
 ---
 
@@ -26,7 +18,7 @@ const { prev, next } = prevNext;
       <a href={prev.href} class="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
         <Icon name="ph:caret-left" class="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
         <span>
-          <span class="block text-xs text-muted-foreground">{prevLabel}</span>
+          <span class="block text-xs text-muted-foreground">Previous</span>
           <span class="font-medium text-foreground">{prev.label}</span>
         </span>
       </a>
@@ -34,7 +26,7 @@ const { prev, next } = prevNext;
     {next ? (
       <a href={next.href} class="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors text-right">
         <span>
-          <span class="block text-xs text-muted-foreground">{nextLabel}</span>
+          <span class="block text-xs text-muted-foreground">Next</span>
           <span class="font-medium text-foreground">{next.label}</span>
         </span>
         <Icon name="ph:caret-right" class="w-4 h-4 transition-transform group-hover:translate-x-0.5" is:inline />

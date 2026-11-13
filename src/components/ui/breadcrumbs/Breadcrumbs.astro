@@ -7,19 +7,9 @@ interface Props extends HTMLAttributes<"nav"> {
   items: Breadcrumb[];
   /** Max visible crumbs before collapsing middle items (default: 4) */
   maxVisible?: number;
-  ariaLabel?: string;
-  /** Label for the collapsed "…" summary, given how many crumbs it hides. */
-  moreSegments?: (count: number) => string;
 }
 
-const {
-  items,
-  maxVisible = 4,
-  ariaLabel = "Breadcrumb",
-  moreSegments = (count: number) => `Show ${count} more path segments`,
-  class: className,
-  ...attrs
-} = Astro.props;
+const { items, maxVisible = 4, class: className, ...attrs } = Astro.props;
 
 // Determine if we need to collapse the middle
 const shouldCollapse = items.length > maxVisible;
@@ -32,7 +22,7 @@ const tailItems = shouldCollapse ? items.slice(items.length - tailCount) : [];
 ---
 
 {items.length > 1 && (
-  <nav aria-label={ariaLabel} class={cn("text-xs font-medium", className)} {...attrs}>
+  <nav aria-label="Breadcrumb" class={cn("text-xs font-medium", className)} {...attrs}>
     <ol class="flex flex-wrap items-center gap-y-0.5 text-muted-foreground">
       {headItems.map((crumb, i) => (
         <li class="flex items-center">
@@ -53,7 +43,7 @@ const tailItems = shouldCollapse ? items.slice(items.length - tailCount) : [];
           <details class="relative group">
             <summary
               class="list-none cursor-pointer select-none rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden group-open:before:fixed group-open:before:inset-0 group-open:before:z-[39] group-open:before:cursor-default group-open:before:content-['']"
-              aria-label={moreSegments(collapsedItems.length)}
+              aria-label={`Show ${collapsedItems.length} more path segments`}
             >
               <span class="tracking-widest">&hellip;</span>
             </summary>

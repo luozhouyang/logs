@@ -41,12 +41,13 @@ test.describe("Site search", () => {
     expect(items.some((item) => item.url.endsWith("/kong/introduction/"))).toBe(true);
   });
 
-  test("search dialog copy follows the locale", async ({ page }) => {
+  test("search dialog uses the stock English copy", async ({ page }) => {
+    // Chrome is the Nimbus default; only the content is localized.
     await page.goto(url("/zh/"));
     await page.keyboard.press("Control+k");
     await expect(page.locator("[data-search-input]")).toHaveAttribute(
       "placeholder",
-      "搜索文章…",
+      "Search documentation…",
     );
   });
 });
