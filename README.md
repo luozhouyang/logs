@@ -32,6 +32,10 @@ The site itself is the stock Nimbus structure: `src/pages/index.astro` landing,
 `DocsLayout` for posts, the starter `Header` (section tabs, search, theme
 toggle), and `Render`/partials support — only the locale plumbing is added.
 
+The homepage (`src/components/HomePage.astro`) is the one custom surface: a
+terminal-style index built from the content itself — topic counts, the full
+post log, feeds and agent links. Everything else is the Nimbus starter.
+
 ```mdx
 ---
 title: Deploying Kong Gateway with Docker

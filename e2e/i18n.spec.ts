@@ -48,19 +48,17 @@ test.describe("Locales", () => {
     await expect(page.locator("[data-lang-switch='zh']")).toHaveAttribute("href", "/zh/");
   });
 
-  test("Chinese landing lists only Chinese sections", async ({ page }) => {
+  test("Chinese landing lists only Chinese sections and posts", async ({ page }) => {
     await page.goto("/zh/");
-    const cards = page.locator("main a");
-    await expect(cards.filter({ hasText: "Kong" })).toHaveAttribute(
-      "href",
-      "/zh/kong/introduction/",
-    );
-    await expect(cards.filter({ hasText: "Cloudflare" })).toHaveAttribute(
-      "href",
-      "/zh/cloudflare/r2-image-hosting/",
-    );
+    const topics = page.locator('section[aria-labelledby="topics-heading"]');
+    await expect(topics.locator("a")).toHaveCount(2);
+    await expect(topics.locator('a[href="/zh/kong/introduction/"]')).toContainText("Kong");
+
     // The English-only e-commerce series has no Chinese counterpart.
     await expect(page.locator("main")).not.toContainText("E Commerce");
+    await expect(
+      page.locator('section[aria-labelledby="latest-heading"] li'),
+    ).toHaveCount(4);
   });
 
   test("Chinese markdown alternate is available for agents", async ({ request }) => {

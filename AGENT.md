@@ -11,8 +11,12 @@ site. The original posts were migrated from an Astro blog, so:
   `src/content/docs/<section>/<slug>.mdx` and are served at the root; Chinese
   posts live in `src/content/zh/<section>/<slug>.mdx` and are served under
   `/zh/`. The section directory groups posts in the sidebar — there is no
-  separate categories/tags layer; the site uses the starter's pages and
+  separate categories/tags layer; post pages use the starter's layout and
   components as-is.
+- **The homepage is the one bespoke surface.** `src/components/HomePage.astro`
+  renders a terminal-style index (hero prompt, topic rows, `cat latest.log`
+  list) for both locales from real content — keep the copy in its `t` object,
+  one branch per locale, so the two homepages cannot drift.
 - **Translations share the entry id.** A translation is the same
   `<section>/<slug>` in the other collection — that pairing drives the language
   switcher (`src/lib/blog-nav.ts`) and the `hreflang` alternates. Mark

@@ -1,0 +1,325 @@
+---
+/**
+ * Landing page — a terminal-flavoured index of the log.
+ *
+ * The site chrome stays on the Nimbus starter; this page is the one bespoke
+ * surface. Shared by both locales: `locale` switches the copy, the links and
+ * the numbers, so the two homepages cannot drift.
+ */
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Header from "./Header.astro";
+import { config } from "virtual:nimbus/config";
+import { getLastUpdated } from "@cloudflare/nimbus-docs";
+import { buildNav, navCards } from "../lib/blog-nav";
+import { loadEntries } from "../lib/content";
+import type { Locale } from "../lib/i18n";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const isZh = locale === "zh";
+const home = isZh ? "/zh/" : "/";
+
+const sections = navCards(await buildNav(locale, home));
+const entries = await loadEntries(locale);
+
+const latest = (
+  await Promise.all(
+    entries.map(async (entry) => ({
+      id: entry.id,
+      title: entry.data.title,
+      date: entry.data.date ?? entry.data.lastUpdated ?? (await getLastUpdated(entry)),
+      tags: (entry.data.tags ?? []).slice(0, 2),
+    })),
+  )
+)
+  .sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0))
+  ;
+
+const totalPosts = entries.length;
+const intro = isZh
+  ? "关于 Cloudflare、Kong Gateway、Docker 与自建服务的笔记。"
+  : "Notes on Cloudflare, Kong Gateway, Docker, and self-hosting.";
+
+const fmtDate = (date?: Date) => (date ? date.toISOString().slice(0, 10) : "—");
+
+const t = isZh
+  ? {
+      prompt: "luozhouyang@edge",
+      path: "~/log",
+      whoami: "luozhouyang",
+      aboutCmd: "cat about.txt",
+      aboutOut: intro,
+      sectionsCmd: "ls -1 sections/",
+      caret: true,
+      stats: [
+        { value: String(totalPosts), label: "篇文章" },
+        { value: String(sections.length), label: "个主题" },
+        { value: "2", label: "种语言" },
+      ],
+      sectionsTitle: "主题",
+      latestTitle: "最新",
+      latestCmd: "cat latest.log",
+      posts: (n: number) => `${n} 篇`,
+      linksCmd: "cat links",
+      links: [
+        { label: "rss", href: "/zh/rss.xml" },
+        { label: "llms.txt", href: "/zh/llms.txt" },
+        { label: "github", href: config.github ?? "https://github.com/luozhouyang", external: true },
+        { label: "english", href: "/" },
+      ],
+    }
+  : {
+      prompt: "luozhouyang@edge",
+      path: "~/log",
+      whoami: "luozhouyang",
+      aboutCmd: "cat about.txt",
+      aboutOut: intro,
+      sectionsCmd: "ls -1 sections/",
+      caret: true,
+      stats: [
+        { value: String(totalPosts), label: "posts" },
+        { value: String(sections.length), label: "topics" },
+        { value: "2", label: "languages" },
+      ],
+      sectionsTitle: "Topics",
+      latestTitle: "Latest",
+      latestCmd: "cat latest.log",
+      posts: (n: number) => `${n} ${n === 1 ? "post" : "posts"}`,
+      linksCmd: "cat links",
+      links: [
+        { label: "rss", href: "/rss.xml" },
+        { label: "llms.txt", href: "/llms.txt" },
+        { label: "github", href: config.github ?? "https://github.com/luozhouyang", external: true },
+        { label: "中文", href: "/zh/" },
+      ],
+    };
+---
+
+<BaseLayout
+  title={config.title}
+  description={isZh ? intro : config.description}
+  lang={isZh ? "zh-CN" : "en"}
+  translations={isZh ? { en: "/" } : { zh: "/zh/" }}
+>
+  <div class="flex flex-col min-h-screen">
+    <Header />
+
+    <main class="geek-grid flex-1 mx-auto w-full max-w-5xl px-6 pb-24 pt-14 sm:pt-20">
+      <!-- Hero ------------------------------------------------------------ -->
+      <section class="relative z-10 grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
+        <div>
+          <p class="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs tracking-tight">
+            <span class="inline-flex h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true"></span>
+            <span class="text-foreground/80">{t.prompt}</span>
+            <span class="text-muted-foreground/40" aria-hidden="true">:</span>
+            <span class="text-muted-foreground">{t.path}</span>
+            <span class="text-muted-foreground/30" aria-hidden="true">·</span>
+            <span class="text-muted-foreground/70">git:(main)</span>
+          </p>
+
+          <h1 class="mt-5 font-mono text-[clamp(2rem,6vw,3.1rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-foreground">
+            <span class="mr-2 select-none text-success" aria-hidden="true">$</span>luozhouyang<span class="text-muted-foreground">.log</span>
+          </h1>
+
+          <p class="mt-5 max-w-xl text-[1.0625rem] leading-relaxed text-muted-foreground [text-wrap:pretty]">
+            {intro}
+          </p>
+
+          <dl class="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3 font-mono text-xs">
+            {t.stats.map((stat) => (
+              <div class="flex items-baseline gap-2">
+                <dt class="sr-only">{stat.label}</dt>
+                <dd class="text-sm font-medium text-foreground">{stat.value}</dd>
+                <span class="text-muted-foreground">{stat.label}</span>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <!-- Decorative terminal session -->
+        <div class="relative z-10 overflow-hidden rounded-xl border border-white/10 bg-[#0d1117] shadow-lg" aria-hidden="true">
+          <div class="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
+            <span class="h-2.5 w-2.5 rounded-full bg-[#ff5f56]/80"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]/80"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-[#27c93f]/80"></span>
+            <span class="ml-2 font-mono text-[11px] text-white/40">{t.prompt}: {t.path} — zsh</span>
+          </div>
+          <div class="space-y-3 px-4 py-4 font-mono text-[12.5px] leading-relaxed sm:text-[13px]">
+            <p class="text-white/90">
+              <span class="text-[#7ee787]">$</span> whoami<br />
+              <span class="text-[#c9d1d9]">{t.whoami}</span>
+            </p>
+            <p class="text-white/90">
+              <span class="text-[#7ee787]">$</span> {t.aboutCmd}<br />
+              <span class="text-[#8b949e]">{t.aboutOut}</span>
+            </p>
+            <p class="text-white/90">
+              <span class="text-[#7ee787]">$</span> {t.sectionsCmd}<br />
+              <span class="text-[#8b949e]">
+                {sections.map((section) => section.label.toLowerCase().replace(/\s+/g, "-")).join("  ")}
+              </span>
+            </p>
+            <p class="text-white/90">
+              <span class="text-[#7ee787]">$</span><span class="caret ml-1 inline-block align-middle" />
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <div class="relative z-10 mt-16 grid gap-10 border-t border-border pt-10 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)] lg:gap-14">
+        <!-- Left rail: topics + links --------------------------------------- -->
+        <div class="space-y-10">
+          <section aria-labelledby="topics-heading">
+            <h2 id="topics-heading" class="flex items-baseline gap-2 font-mono text-xs text-muted-foreground">
+              <span class="text-success" aria-hidden="true">$</span>
+              <span>{t.sectionsCmd}</span>
+            </h2>
+            <ul class="mt-4">
+              {sections.map((section, index) => (
+                <li>
+                  <a
+                    href={section.href}
+                    class="group flex items-baseline gap-3 border-b border-border py-3 no-underline transition-colors hover:border-border-strong"
+                  >
+                    <span class="font-mono text-[11px] tabular-nums text-muted-foreground/60">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span class="font-medium text-foreground">{section.label}</span>
+                    <span class="ml-auto font-mono text-[11px] text-muted-foreground">
+                      {t.posts(section.count)}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      class="text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-foreground"
+                    >→</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section aria-labelledby="links-heading">
+            <h2 id="links-heading" class="flex items-baseline gap-2 font-mono text-xs text-muted-foreground">
+              <span class="text-success" aria-hidden="true">$</span>
+              <span>{t.linksCmd}</span>
+            </h2>
+            <ul class="mt-4 overflow-hidden rounded-lg border border-border bg-card font-mono text-[12px]">
+              {t.links.map((link) => (
+                <li class="border-b border-border last:border-b-0">
+                  <a
+                    href={link.href}
+                    class="group flex items-center gap-3 px-3 py-2 text-muted-foreground no-underline transition-colors hover:bg-accent/60 hover:text-foreground"
+                  >
+                    <span aria-hidden="true" class="text-muted-foreground/50">›</span>
+                    <span class="flex-1">{link.label}</span>
+                    <span
+                      aria-hidden="true"
+                      class="text-muted-foreground/60 transition-transform duration-200 group-hover:translate-x-0.5"
+                    >{"external" in link && link.external ? "↗" : "→"}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+
+        <!-- Log ------------------------------------------------------------- -->
+        <section aria-labelledby="latest-heading">
+          <h2 id="latest-heading" class="flex items-baseline gap-2 font-mono text-xs text-muted-foreground">
+            <span class="text-success" aria-hidden="true">$</span>
+            <span>{t.latestCmd}</span>
+          </h2>
+          <div class="mt-4 overflow-hidden rounded-xl border border-border bg-card">
+            <ol class="divide-y divide-border">
+              {latest.map((post) => (
+                <li>
+                  <a
+                    href={isZh ? `/zh/${post.id}/` : `/${post.id}/`}
+                    class="group flex items-baseline gap-3 px-3 py-2 font-mono text-[12px] no-underline transition-colors hover:bg-accent/60"
+                  >
+                    <time class="shrink-0 tabular-nums text-muted-foreground/70" datetime={post.date?.toISOString()}>
+                      {fmtDate(post.date)}
+                    </time>
+                    <span class="min-w-0 flex-1 truncate text-foreground/90 group-hover:text-foreground">
+                      {post.title}
+                    </span>
+                    {post.tags.length > 0 && (
+                      <span class="hidden shrink-0 gap-2 text-[11px] text-muted-foreground/60 sm:flex">
+                        {post.tags.map((tag) => (
+                          <span>#{tag}</span>
+                        ))}
+                      </span>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ol>
+            <div class="flex items-center justify-between border-t border-border bg-muted/40 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+              <span>{totalPosts} entries</span>
+              <span aria-hidden="true">EOF</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Status strip ------------------------------------------------------ -->
+      <div class="relative z-10 mt-14 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-5 font-mono text-[11px] text-muted-foreground">
+        <span class="inline-flex items-center gap-1.5">
+          <span class="inline-flex h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true"></span>
+          static
+        </span>
+        <span>astro 7</span>
+        <span>nimbus</span>
+        <span>cloudflare workers</span>
+        <span class="ml-auto hidden sm:inline" aria-hidden="true">{t.prompt}:{t.path}$</span>
+      </div>
+    </main>
+  </div>
+</BaseLayout>
+
+<style>
+  /* Dot grid behind the hero, fading out so it never fights the text. */
+  .geek-grid {
+    position: relative;
+  }
+
+  .geek-grid::before {
+    content: "";
+    position: absolute;
+    inset: -2rem -1rem auto;
+    height: 34rem;
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      color-mix(in oklch, var(--nb-foreground) 13%, transparent) 1px,
+      transparent 0
+    );
+    background-size: 20px 20px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 25% 20%, black, transparent 72%);
+    mask-image: radial-gradient(ellipse 70% 60% at 25% 20%, black, transparent 72%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Block cursor at the end of the decorative session. */
+  .caret::after {
+    content: "▍";
+    margin-left: 0.15em;
+    color: #7ee787;
+    animation: blink 1.1s steps(1) infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caret::after {
+      animation: none;
+    }
+  }
+</style>

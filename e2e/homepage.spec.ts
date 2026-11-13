@@ -1,26 +1,32 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Homepage", () => {
-  test("renders title and description", async ({ page }) => {
+  test("renders the hero title and description", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("h1")).toContainText("luozhouyang's log");
+    await expect(page.locator("h1")).toContainText("luozhouyang");
     await expect(page.locator("main p").first()).toBeVisible();
   });
 
-  test("displays section cards with correct links", async ({ page }) => {
+  test("lists every post in the log", async ({ page }) => {
     await page.goto("/");
-    const kongCard = page.locator('main a[href="/kong/introduction/"]');
-    const cfCard = page.locator('main a[href="/cloudflare/r2-image-hosting/"]');
-
-    await expect(kongCard).toBeVisible();
-    await expect(kongCard).toContainText("Kong");
-    await expect(cfCard).toBeVisible();
-    await expect(cfCard).toContainText("Cloudflare");
+    const log = page.locator('section[aria-labelledby="latest-heading"] li');
+    await expect(log).toHaveCount(14);
+    await expect(log.first()).toContainText("Database Design");
   });
 
-  test("section cards navigate to a post", async ({ page }) => {
+  test("displays topic rows with correct links", async ({ page }) => {
     await page.goto("/");
-    await page.locator('main a[href="/kong/introduction/"]').click();
+    const topics = page.locator('section[aria-labelledby="topics-heading"]');
+    await expect(topics.locator("a")).toHaveCount(3);
+    await expect(topics.locator('a[href="/kong/introduction/"]')).toContainText("Kong");
+    await expect(
+      topics.locator('a[href="/cloudflare/r2-image-hosting/"]'),
+    ).toContainText("Cloudflare");
+  });
+
+  test("topic rows navigate to a post", async ({ page }) => {
+    await page.goto("/");
+    await page.locator('section[aria-labelledby="topics-heading"] a[href="/kong/introduction/"]').click();
     await expect(page).toHaveURL(/\/kong\/introduction\/?$/);
     await expect(page.locator("h1")).toContainText("Kong Gateway introduction");
   });
