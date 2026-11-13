@@ -2,24 +2,24 @@ import { defineCollection } from "astro:content";
 // `z` re-exported from `astro:content` is deprecated; import it from
 // `astro/zod` (the pattern nimbus-docs' own schema helpers document).
 import { z } from "astro/zod";
-import { docsCollection } from "@cloudflare/nimbus-docs/content";
+import { docsCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
 
 /**
  * Frontmatter fields this blog adds on top of Nimbus's docs schema. Shared by
- * every locale so a post reads the same wherever it lives.
+ * both locales so a post reads the same wherever it lives.
  */
 const blogFields = {
+  // Nimbus docs are agent-friendly by default. Set `audience: human` to flag
+  // a page that's written primarily for human readers.
   audience: z.literal("human").optional(),
   tags: z.array(z.string()).optional(),
   // First published, carried over from the pre-Nimbus blog (`pubDate`).
-  // Nimbus models `lastUpdated` natively; `date` is the authored date and is
-  // shown before it on the page.
+  // Nimbus models `lastUpdated` natively; `date` is the authored date shown
+  // before it on the page.
   date: z.coerce.date().optional(),
-  // Content language for pages that aren't in the site locale. Drives
-  // <html lang> and search segmentation.
+  // Content language for pages that aren't in the site locale.
   lang: z.string().optional(),
-  // Marks a post as a translation of the post with the same id in another
-  // locale, so the language switcher can point at the original.
+  // Marks a post as a translation of the same-id post in the other locale.
   translatedFrom: z.enum(["en", "zh"]).optional(),
 };
 
@@ -37,4 +37,5 @@ export const collections = {
       schemaFields: blogFields,
     }),
   ),
+  partials: defineCollection(partialsCollection()),
 };

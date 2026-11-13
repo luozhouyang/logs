@@ -27,8 +27,10 @@ the routes under `src/pages/<locale>/` are thin copies of the root ones.
 ## Content
 
 Posts live in `src/content/<collection>/<section>/<slug>.mdx`. The section
-directory is the post's category (`/kong/introduction/` → category `kong`), and
-frontmatter `tags` drive `/tags/<tag>/` pages.
+directory groups posts in the sidebar (`/kong/introduction/` sits under `Kong`).
+The site itself is the stock Nimbus structure: `src/pages/index.astro` landing,
+`DocsLayout` for posts, the starter `Header` (section tabs, search, theme
+toggle), and `Render`/partials support — only the locale plumbing is added.
 
 ```mdx
 ---

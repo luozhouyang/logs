@@ -10,8 +10,9 @@ site. The original posts were migrated from an Astro blog, so:
 - **The site is bilingual, English by default.** English posts live in
   `src/content/docs/<section>/<slug>.mdx` and are served at the root; Chinese
   posts live in `src/content/zh/<section>/<slug>.mdx` and are served under
-  `/zh/`. The section directory is the post's category; `/categories/*` and
-  `/tags/*` are generated per locale by `src/lib/taxonomy.ts`.
+  `/zh/`. The section directory groups posts in the sidebar — there is no
+  separate categories/tags layer; the site uses the starter's pages and
+  components as-is.
 - **Translations share the entry id.** A translation is the same
   `<section>/<slug>` in the other collection — that pairing drives the language
   switcher (`src/lib/blog-nav.ts`) and the `hreflang` alternates. Mark

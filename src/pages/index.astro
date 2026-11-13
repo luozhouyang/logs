@@ -1,11 +1,10 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Header from "../components/Header.astro";
-import { LinkCard } from "../components/ui/link-card";
 import { config } from "virtual:nimbus/config";
-import { getCategories } from "../lib/taxonomy";
+import { buildNav, navCards } from "../lib/blog-nav";
 
-const categories = await getCategories();
+const cards = navCards(await buildNav("en", "/"));
 ---
 
 <BaseLayout title={config.title} description={config.description} translations={{ zh: "/zh/" }}>
@@ -22,13 +21,17 @@ const categories = await getCategories();
         {config.description}
       </p>
 
-      <div class="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {categories.map((cat) => (
-          <LinkCard
-            title={cat.label}
-            description={`${cat.count} post${cat.count === 1 ? "" : "s"}`}
-            href={`/categories/${cat.slug}/`}
-          />
+      <div class="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {cards.map((card) => (
+          <a
+            href={card.href}
+            class="block rounded-lg border border-border p-4 transition-colors hover:border-border-strong no-underline"
+          >
+            <div class="font-medium text-foreground">{card.label}</div>
+            <div class="mt-0.5 text-sm text-muted-foreground">
+              {card.count} post{card.count === 1 ? "" : "s"}
+            </div>
+          </a>
         ))}
       </div>
     </main>

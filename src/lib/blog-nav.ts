@@ -1,15 +1,14 @@
 /**
- * Navigation for the blog's locale-specific sidebars.
+ * Navigation data for the blog's locale-specific pages.
  *
- * Nimbus builds its sidebar/prev-next/breadcrumbs from the primary `docs`
- * collection and only knows how to prefix URLs for docs *versions*, so pages in
- * a second locale (`zh`) build their navigation here instead. The shapes match
- * the Nimbus components, so `Sidebar`, `Pagination` and `Breadcrumbs` render
- * them unchanged.
+ * Nimbus builds its sidebar/prev/breadcrumbs from the primary `docs` collection
+ * and only prefixes URLs for docs *versions*, so pages in a second locale
+ * (`zh`) derive their navigation here. Shapes match the Nimbus components, so
+ * `Sidebar`, `Pagination` and `Breadcrumbs` render them unchanged.
  */
 import { getCollection } from "astro:content";
 import { categoryLabel, localePath, type Locale, type TranslationLinks } from "./i18n";
-import { getCategoryFromId, loadEntries } from "./taxonomy";
+import { getCategoryFromId, loadEntries } from "./content";
 
 export interface NavLink {
   type: "link";
@@ -109,6 +108,33 @@ export function findPrevNext(items: NavItem[], currentPath: string): PrevNextLin
   return { prev: toLink(links[index - 1]), next: toLink(links[index + 1]) };
 }
 
+/**
+ * Top-level sections in the shape the header's tab strip needs — the same
+ * `{ label, href, isActive }` shape as Nimbus's `getSidebarSections`, so the
+ * stock header markup can render either locale.
+ */
+export function navSections(items: NavItem[], currentPath: string) {
+  const current = normalize(currentPath);
+  return items
+    .filter((item): item is NavGroup => item.type === "group")
+    .map((group) => ({
+      label: group.label,
+      href: group.children[0]?.href ?? "/",
+      isActive: group.children.some((child) => normalize(child.href) === current),
+    }));
+}
+
+/** Sections plus where they lead, for the landing page's cards. */
+export function navCards(items: NavItem[]) {
+  return items
+    .filter((item): item is NavGroup => item.type === "group")
+    .map((group) => ({
+      label: group.label,
+      href: group.children[0]?.href ?? "/",
+      count: group.children.length,
+    }));
+}
+
 /** Home / section / page trail for a post. */
 export function buildBreadcrumbs(
   locale: Locale,
@@ -120,7 +146,6 @@ export function buildBreadcrumbs(
     { label: homeLabel, href: localePath(locale, "/") },
     {
       label: categoryLabel(locale, section),
-      href: localePath(locale, `/categories/${section}/`),
     },
     { label: entry.data.title },
   ];
@@ -145,9 +170,4 @@ export async function translationsFor(
   }
 
   return links;
-}
-
-/** Target for the language switcher when a page has no counterpart. */
-export function fallbackTranslation(locale: Locale): TranslationLinks {
-  return { [locale]: localePath(locale, "/") };
 }

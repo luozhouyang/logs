@@ -1,18 +1,16 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import Header from "../../components/Header.astro";
-import { LinkCard } from "../../components/ui/link-card";
 import { config } from "virtual:nimbus/config";
-import { getCategories } from "../../lib/taxonomy";
-import { ui } from "../../lib/i18n";
+import { buildNav, navCards } from "../../lib/blog-nav";
 
-const categories = await getCategories("zh");
-const labels = ui.zh;
+const cards = navCards(await buildNav("zh", "/zh/"));
+const description = "关于 Cloudflare、Kong Gateway、Docker 与自建服务的笔记。";
 ---
 
 <BaseLayout
   title={config.title}
-  description="关于 Cloudflare、Kong Gateway、Docker 与自建服务的笔记。"
+  description={description}
   lang="zh-CN"
   translations={{ en: "/" }}
 >
@@ -26,16 +24,18 @@ const labels = ui.zh;
         {config.title}
       </h1>
       <p class="mt-2 text-[1.0625rem] text-muted-foreground leading-relaxed">
-        关于 Cloudflare、Kong Gateway、Docker 与自建服务的笔记。
+        {description}
       </p>
 
-      <div class="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {categories.map((cat) => (
-          <LinkCard
-            title={cat.label}
-            description={labels.postCount(cat.count)}
-            href={`/zh/categories/${cat.slug}/`}
-          />
+      <div class="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {cards.map((card) => (
+          <a
+            href={card.href}
+            class="block rounded-lg border border-border p-4 transition-colors hover:border-border-strong no-underline"
+          >
+            <div class="font-medium text-foreground">{card.label}</div>
+            <div class="mt-0.5 text-sm text-muted-foreground">{card.count} 篇文章</div>
+          </a>
         ))}
       </div>
     </main>

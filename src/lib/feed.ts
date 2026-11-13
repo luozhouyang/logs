@@ -10,7 +10,7 @@ import rss from "@astrojs/rss";
 import { getLastUpdated } from "@cloudflare/nimbus-docs";
 import { config } from "virtual:nimbus/config";
 import { locales, localePath, type Locale } from "./i18n";
-import { loadEntries } from "./taxonomy";
+import { loadEntries } from "./content";
 
 interface FeedItem {
   title: string;
