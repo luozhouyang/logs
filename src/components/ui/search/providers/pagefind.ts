@@ -29,6 +29,96 @@ interface PagefindApi {
 let pagefind: PagefindApi | undefined;
 
 /**
+ * Development fallback.
+ *
+ * Pagefind indexes the built site, so `astro dev` has no index and the dialog
+ * used to answer every query with "available after a production build". The
+ * build-time `/search-index.json` (all posts, both locales) fills that gap with
+ * a plain substring search; production keeps using Pagefind.
+ */
+interface FallbackItem {
+  title: string;
+  description: string;
+  tags: string[];
+  lang: string;
+  url: string;
+}
+
+let fallbackIndex: FallbackItem[] | undefined;
+
+function siteBase(): URL {
+  return new URL(import.meta.env.BASE_URL ?? "/", window.location.origin);
+}
+
+async function loadPagefind(): Promise<PagefindApi | undefined> {
+  try {
+    const pagefindUrl = new URL("pagefind/pagefind.js", siteBase());
+    const api = (await import(/* @vite-ignore */ pagefindUrl.href)) as PagefindApi;
+    await api.init();
+    return api;
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadFallbackIndex(): Promise<FallbackItem[]> {
+  try {
+    const response = await fetch(new URL("search-index.json", siteBase()).href);
+    if (!response.ok) return [];
+    return (await response.json()) as FallbackItem[];
+  } catch {
+    return [];
+  }
+}
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+
+function snippetFor(item: FallbackItem, needle: string): string {
+  const text = item.description || item.title;
+  const index = text.toLowerCase().indexOf(needle);
+  if (index === -1) return escapeHtml(text.slice(0, 140));
+
+  const start = Math.max(0, index - 40);
+  const end = Math.min(text.length, index + needle.length + 80);
+  const before = (start > 0 ? "…" : "") + escapeHtml(text.slice(start, index));
+  const hit = `<mark>${escapeHtml(text.slice(index, index + needle.length))}</mark>`;
+  const after = escapeHtml(text.slice(index + needle.length, end)) + (end < text.length ? "…" : "");
+  return before + hit + after;
+}
+
+function searchFallback(index: FallbackItem[], query: string): SearchResult[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+
+  return index
+    .map((item) => {
+      const title = item.title.toLowerCase();
+      const description = item.description.toLowerCase();
+      const tags = item.tags.join(" ").toLowerCase();
+
+      const score =
+        (title.includes(needle) ? 4 : 0) +
+        (tags.includes(needle) ? 2 : 0) +
+        (description.includes(needle) ? 1 : 0);
+
+      return { item, score };
+    })
+    .filter((hit) => hit.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+    .map(({ item }) => ({
+      title: item.title,
+      url: item.url,
+      snippet: snippetFor(item, needle),
+    }));
+}
+
+/**
  * Default Pagefind filters applied to every search.
  *
  * Versioning: when the site has a `versions.deprecated` list, the
@@ -52,16 +142,18 @@ const defaultFilters: PagefindFilters | undefined =
 
 export const provider: SearchProvider = {
   async init() {
-    if (pagefind) return;
-    const baseUrl = new URL(import.meta.env.BASE_URL ?? "/", window.location.origin);
-    const pagefindUrl = new URL("pagefind/pagefind.js", baseUrl);
-    pagefind = (await import(/* @vite-ignore */ pagefindUrl.href)) as PagefindApi;
-    await pagefind.init();
+    if (pagefind || fallbackIndex) return;
+    pagefind = await loadPagefind();
+    if (!pagefind) fallbackIndex = await loadFallbackIndex();
   },
 
   async search(query) {
-    if (!pagefind) await this.init?.();
-    if (!pagefind) return [];
+    if (!pagefind && !fallbackIndex) await this.init?.();
+    // Production (and any build with an index) uses Pagefind…
+    if (!pagefind) {
+      // …dev falls back to the JSON index so search still works.
+      return fallbackIndex ? searchFallback(fallbackIndex, query) : [];
+    }
 
     const search = await pagefind.search(
       query,

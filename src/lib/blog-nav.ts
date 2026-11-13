@@ -111,22 +111,6 @@ export function findPrevNext(items: NavItem[], currentPath: string): PrevNextLin
   return { prev: toLink(links[index - 1]), next: toLink(links[index + 1]) };
 }
 
-/**
- * Top-level sections in the shape the header's tab strip needs — the same
- * `{ label, href, isActive }` shape as Nimbus's `getSidebarSections`, so the
- * stock header markup can render either locale.
- */
-export function navSections(items: NavItem[], currentPath: string) {
-  const current = normalize(currentPath);
-  return items
-    .filter((item): item is NavGroup => item.type === "group")
-    .map((group) => ({
-      label: group.label,
-      href: group.children[0]?.href ?? "/",
-      isActive: group.children.some((child) => normalize(child.href) === current),
-    }));
-}
-
 /** Sections plus where they lead, for the landing page's cards. */
 export function navCards(items: NavItem[]) {
   return items

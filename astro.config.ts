@@ -9,13 +9,20 @@ import { join } from "node:path";
 
 // GitHub Pages serves project sites under /<repo>/, so the site is built for
 // https://luozhouyang.github.io/logs by default. The same source can still be
-// built for a root deploy (e.g. Cloudflare Workers on luozhouyang.com) with
-// `SITE_URL=https://luozhouyang.com SITE_BASE= npm run build`.
+// built for a domain root with `SITE_URL=https://example.com SITE_BASE= npm run build`.
 const SITE_URL = process.env.SITE_URL ?? "https://luozhouyang.github.io";
 // Trailing slash matters: NimbusHead concatenates `import.meta.env.BASE_URL`
 // with file names ("favicon.ico", "_nimbus/shiki.css"), so it must end in "/".
 const SITE_BASE = process.env.SITE_BASE ?? "/logs/";
-const BASE_PREFIX = SITE_BASE.replace(/\/+$/, "");
+
+// `astro dev` gets a root-mounted site: `pnpm dev` prints http://localhost:4321
+// and that URL should be the site, not a 404 outside the deploy prefix. Builds
+// and previews keep the real base, so what ships is still /logs/.
+const isDevCommand =
+  process.env.npm_lifecycle_event === "dev" || process.argv[2] === "dev";
+const EFFECTIVE_BASE =
+  isDevCommand && process.env.SITE_BASE === undefined ? "" : SITE_BASE;
+const BASE_PREFIX = EFFECTIVE_BASE.replace(/\/+$/, "");
 
 /** Prefix an in-site path for the deployment base (used by redirects). */
 const withBasePath = (path: string) =>
@@ -70,7 +77,7 @@ const nimbusConfig = defineNimbusConfig({
 export default defineConfig({
   output: "static",
   site: SITE_URL,
-  base: SITE_BASE,
+  base: EFFECTIVE_BASE,
   // The pre-Nimbus site served posts at /blog/<slug>/ and paginated listings
   // at /page/<n>/. Those URLs are in the wild, so keep them alive instead of
   // 404-ing: each one points at the post wherever it now lives.
@@ -118,7 +125,7 @@ export default defineConfig({
       markdown: {
         // tableScroll wraps wide tables; baseContentUrls rewrites `/images/…`
         // and other root-relative content URLs for the /logs deployment.
-        hastPlugins: [tableScroll(), baseContentUrls(SITE_BASE)],
+        hastPlugins: [tableScroll(), baseContentUrls(EFFECTIVE_BASE)],
       },
     }),
   ],

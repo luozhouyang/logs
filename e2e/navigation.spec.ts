@@ -50,14 +50,11 @@ test.describe("Navigation", () => {
     }
   });
 
-  test("header section tabs appear on docs pages", async ({ page, isMobile }) => {
-    test.skip(isMobile, "Section tabs hidden on mobile");
+  test("header has no section tab strip", async ({ page }) => {
     await page.goto(url("/kong/introduction"));
-    const sections = page.locator("nav[aria-label='Sections']");
-    // One tab per top-level section (cloudflare, e-commerce, kong).
-    if (await sections.isVisible()) {
-      await expect(sections.locator("a")).toHaveCount(3);
-    }
+    // The nav is intentionally just the site title, search, language, GitHub
+    // and the theme toggle — sections live in the sidebar, not the header.
+    await expect(page.locator("nav[aria-label='Sections']")).toHaveCount(0);
   });
 });
 

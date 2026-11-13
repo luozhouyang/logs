@@ -4,8 +4,6 @@ packages: []
 allowBuilds: # pnpm 11
   esbuild: false
   sharp: false
-  workerd: false
 ignoredBuiltDependencies: # pnpm 10
   - esbuild
   - sharp
-  - workerd

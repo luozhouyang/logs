@@ -5,9 +5,8 @@ built on [Cloudflare Nimbus](https://nimbus-docs.com) — the Astro-based docs
 framework — with Pagefind search.
 
 Live at **<https://luozhouyang.github.io/logs>**, deployed by GitHub Actions to
-GitHub Pages. The same build can still target a domain root (Cloudflare
-Workers) with the `SITE_URL`/`SITE_BASE` environment variables — see
-[Deployment](#deployment).
+GitHub Pages. `SITE_URL`/`SITE_BASE` override the origin and path when the same
+build is served elsewhere — see [Deployment](#deployment).
 
 ## Languages
 
@@ -76,7 +75,6 @@ Only `title` is required. Component and authoring rules are documented in
 | `npm run lint:docs` | Lint content (`nimbus-docs lint`), `--fix` to autofix |
 | `npm run typecheck` | `astro check` |
 | `npm run test:e2e` | Playwright suite against the production build under `/logs` (port 4327) |
-| `npm run deploy` | Check, build, and `wrangler deploy` (Cloudflare Workers) |
 
 ## URLs and redirects
 
@@ -91,9 +89,13 @@ agent index (`/llms.txt`, `/zh/llms.txt`) plus clean-markdown alternates at
 
 ## Search
 
-Search is Pagefind. It indexes per language (from each page's `<html lang>`
-and the search dialog queries the index for the page you're on: English pages
-search English posts, `/zh/` pages search Chinese posts.
+Search is Pagefind. It indexes per language (from each page's `<html lang>`)
+and the dialog queries the index for the page you're on: English pages search
+English posts, `/zh/` pages search Chinese posts.
+
+Pagefind only builds during `npm run build`. `astro dev` would otherwise have
+no index, so the provider falls back to `/search-index.json` — a build-time
+JSON index of every post in both locales. Production always uses Pagefind.
 
 Framework chrome (table of contents, pagination, page actions, search dialog)
 is localized through `src/lib/ui-labels.ts`; components fall back to English
@@ -113,16 +115,6 @@ then uploads `dist/` as the Pages artifact.
 
 Locally, `npm run preview` serves the build at `/logs/` too, and the e2e suite
 expects that (`E2E_BASE=""` switches it to a root build).
-
-### Cloudflare Workers
-
-`wrangler.jsonc` serves `dist/` as static assets. Because the default build is
-now mounted at `/logs`, build a root-deployable bundle first:
-
-```sh
-SITE_URL=https://luozhouyang.com SITE_BASE= npm run build
-npx wrangler deploy
-```
 
 ### Base paths
 

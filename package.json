@@ -10,10 +10,6 @@
     "typecheck": "astro check",
     "lint:docs": "nimbus-docs lint",
     "lint:docs:fix": "nimbus-docs lint --fix",
-    "prepreview:cf": "astro build",
-    "preview:cf": "wrangler dev",
-    "predeploy": "astro check && astro build",
-    "deploy": "wrangler deploy",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:update": "playwright test --update-snapshots",
@@ -38,11 +34,9 @@
     "@tailwindcss/vite": "^4.1.4",
     "pagefind": "^1.5.2",
     "tailwindcss": "^4.1.4",
-    "typescript": "^5.8.3",
-    "wrangler": "^4.95.0"
+    "typescript": "^5.8.3"
   },
   "allowScripts": {
-    "esbuild@0.28.1": true,
-    "workerd@1.20260722.1": true
+    "esbuild@0.28.1": true
   }
 }

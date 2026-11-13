@@ -33,6 +33,14 @@ test.describe("Site search", () => {
     ).toBeVisible();
   });
 
+  test("exposes the build-time index used as the dev fallback", async ({ request }) => {
+    const response = await request.get(url("/search-index.json"));
+    expect(response.status()).toBe(200);
+    const items = (await response.json()) as { url: string; title: string }[];
+    expect(items.length).toBe(18);
+    expect(items.some((item) => item.url.endsWith("/kong/introduction/"))).toBe(true);
+  });
+
   test("search dialog copy follows the locale", async ({ page }) => {
     await page.goto(url("/zh/"));
     await page.keyboard.press("Control+k");

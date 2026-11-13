@@ -5,7 +5,6 @@ import { LinkButton } from "./ui/link-button";
 import { ThemeToggle } from "./ui/theme-toggle";
 import { SearchTrigger } from "./ui/search";
 import { config } from "virtual:nimbus/config";
-import { buildNav, navSections } from "../lib/blog-nav";
 import { locales, localeHome, otherLocale, parseLocale, ui, type TranslationLinks } from "../lib/i18n";
 import { chrome } from "../lib/ui-labels";
 
@@ -29,14 +28,9 @@ interface Props {
 // destructure to avoid an unused-var warning.
 const { showSidebar = true, translations } = Astro.props;
 
-// Normalize trailing slash so isActive matches sidebar hrefs.
-const currentSlug = Astro.url.pathname.replace(/\/$/, "") || "/";
-const locale = parseLocale(currentSlug);
+const locale = parseLocale(Astro.url.pathname);
 const labels = ui[locale];
 const chromeLabels = chrome(locale);
-const sections = navSections(await buildNav(locale, currentSlug), currentSlug);
-const showSections = sections.length >= 2;
-
 const alternateLocale = otherLocale(locale);
 const alternateHref = translations?.[alternateLocale] ?? localeHome(alternateLocale);
 ---
@@ -50,24 +44,6 @@ const alternateHref = translations?.[alternateLocale] ?? localeHome(alternateLoc
         </span>
       </a>
 
-      {showSections && (
-        <nav aria-label="Sections" class="hidden md:flex items-center gap-1 ml-4 pl-4 border-l border-border h-6">
-          {sections.map((section) => (
-            <a
-              href={section.href}
-              aria-current={section.isActive ? "page" : undefined}
-              class:list={[
-                "px-2 py-1 rounded-md text-[0.8125rem] font-medium no-underline transition-colors",
-                section.isActive
-                  ? "text-foreground bg-accent"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/60",
-              ]}
-            >
-              {section.label}
-            </a>
-          ))}
-        </nav>
-      )}
     </div>
 
     <div class="flex items-center gap-2">
