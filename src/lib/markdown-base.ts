@@ -2,9 +2,9 @@
  * Rewrite root-relative URLs in rendered markdown for a sub-path deployment.
  *
  * Content writes images as `/images/kong-manager.png`. On GitHub Pages the site
- * lives under `/logs`, so that would 404. Nimbus runs its own markdown
- * pipeline (`markdown.hastPlugins`) and leaves absolute content URLs alone, so
- * this pass prefixes them at build time.
+ * lives under `/logs`, so that would 404. Nimbus runs its own markdown pipeline
+ * (`markdown.hastPlugins`) and leaves absolute content URLs alone, so this pass
+ * prefixes them at build time.
  */
 
 import type { Element } from "hast";

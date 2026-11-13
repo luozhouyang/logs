@@ -16,10 +16,10 @@
  * `loading` swaps it for a spinner and disables the button.
  *
  * Styling lives in `./variants` (shared with LinkButton). For an anchor
- * styled as a button, use `~/components/ui/link-button`.
+ * styled as a button, use `@/components/ui/link-button`.
  */
 import { cn } from "@/lib/cn";
-import { Icon } from "astro-icon/components";
+import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import type { HTMLAttributes } from "astro/types";
 import {
   buttonVariants,
@@ -53,6 +53,8 @@ const {
 ---
 
 <button
+  data-slot="button"
+  data-variant={variant}
   type={type}
   disabled={disabled || loading}
   class={cn(buttonVariants({ variant, size, shape }), className)}

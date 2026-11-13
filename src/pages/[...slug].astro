@@ -1,61 +1,53 @@
 ---
-/**
- * English post page — the default locale, served at the site root.
- * Nimbus's own sidebar/breadcrumb/prev-next helpers drive it, as in the starter.
- */
 import DocsLayout from "../layouts/DocsLayout.astro";
 import {
-  getBreadcrumbs,
-  getDocsPageProps,
   getDocsStaticPaths,
-  getEditUrl,
-  getLastUpdated,
-  getPrevNext,
+  getDocsPage,
   getRouteFlags,
   getSidebar,
+  getPrevNext,
+  getBreadcrumbs,
+  getEditUrl,
+  getLastUpdated,
   getTOC,
-} from "@cloudflare/nimbus-docs";
+  stripBase,
+} from "@cloudflare/nimbus-docs/runtime";
 import { components } from "../components";
-import { stripBase, withBase, withBaseDeep } from "../lib/base";
 
-export const prerender = true;
 export const getStaticPaths = getDocsStaticPaths;
 
-const { entry, Content, headings } = await getDocsPageProps(Astro);
+const page = await getDocsPage(Astro);
+if (page instanceof Response) return page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
-const currentSlug = Astro.url.pathname.replace(/\/$/, "") || "/";
-// Nimbus compares nav links against a root-relative path, so hand it the
-// route without the deployment base; the hrefs are re-prefixed below.
-const routeSlug = stripBase(currentSlug);
+const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
+// Chinese posts live under docs/zh/ and are served at /zh/. The framework's
+// `<html lang>` is site-wide, so tell it the page's language for Pagefind and
+// accessibility.
+const locale = currentSlug === "/zh" || currentSlug.startsWith("/zh/") ? "zh-CN" : undefined;
 
 const { sidebar: sidebarOn, tableOfContents: tocOn } = await getRouteFlags(entry);
 
-// Nimbus 0.8 predates `base`: it builds root-relative nav links and compares
-// them against a root-relative path. Build with the stripped path, then prefix
-// the links for /logs — prev/next must read the *unprefixed* tree, or it can't
-// find the current page.
-const rawSidebar = sidebarOn
-  ? await getSidebar(routeSlug, { collection: entry.collection })
+const sidebar = sidebarOn
+  ? await getSidebar(currentSlug, { collection: entry.collection })
   : false;
-const sidebar = rawSidebar === false ? false : withBaseDeep(rawSidebar);
-const prevNext = withBaseDeep(
-  await getPrevNext(routeSlug, {
-    sidebarTree: rawSidebar === false ? [] : rawSidebar,
-    overrides: { prev: entry.data.prev, next: entry.data.next },
-  }),
-);
-const breadcrumbs = withBaseDeep(
-  await getBreadcrumbs(routeSlug, { collection: entry.collection }),
-);
+const prevNext = await getPrevNext(currentSlug, {
+  sidebarTree: sidebar === false ? [] : sidebar,
+  overrides: { prev: entry.data.prev, next: entry.data.next },
+});
+// Pass `collection` so versioned pages (docs-<v>) get version-prefixed
+// breadcrumb hrefs — parity with the getSidebar call above.
+const breadcrumbs = await getBreadcrumbs(currentSlug, { collection: entry.collection });
 const editUrl = await getEditUrl(entry);
 // Frontmatter wins; git is the fallback.
-const lastUpdated = entry.data.lastUpdated ?? (await getLastUpdated(entry));
+const lastUpdated = entry.data.lastUpdated ??
+  await getLastUpdated(entry);
+// `tocOn` already implies `tableOfContents !== false`, but TS can't carry
+// that boolean narrowing to the value here — re-check it so `getTOC` only
+// ever sees its options object (or undefined), never `false`.
 const tocConfig = entry.data.tableOfContents;
 const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
-const markdownUrl = withBase(`/${entry.id}/index.md`);
-const socialImage = entry.data.socialImage
-  ? withBase(entry.data.socialImage)
-  : withBase(`/og/${entry.id}.png`);
+const socialImage = entry.data.socialImage ?? ogImageUrl;
 ---
 
 <DocsLayout
@@ -76,6 +68,7 @@ const socialImage = entry.data.socialImage
   editUrl={editUrl}
   draft={entry.data.draft}
   audience={entry.data.audience}
+  locale={locale}
   collection={entry.collection}
   entryId={entry.id}
 >

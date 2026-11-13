@@ -10,10 +10,10 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Header from "./Header.astro";
 import { config } from "virtual:nimbus/config";
-import { getLastUpdated } from "@cloudflare/nimbus-docs";
+import { getLastUpdated } from "@cloudflare/nimbus-docs/runtime";
 import { buildNav } from "../lib/blog-nav";
 import { getCategoryFromId, loadEntries } from "../lib/content";
-import { localePath, type Locale } from "../lib/i18n";
+import { entryPath, localePath, type Locale } from "../lib/i18n";
 
 interface Props {
   locale: Locale;
@@ -21,7 +21,7 @@ interface Props {
 
 const { locale } = Astro.props;
 const isZh = locale === "zh";
-const home = isZh ? "/zh/" : "/";
+const home = localePath(locale, "/");
 
 const nav = await buildNav(locale, home);
 const sections = nav
@@ -35,7 +35,7 @@ const posts = (
       const date = entry.data.date ?? entry.data.lastUpdated ?? (await getLastUpdated(entry));
       return {
         id: entry.id,
-        href: localePath(locale, `/${entry.id}/`),
+        href: entryPath(locale, entry.id),
         title: entry.data.title,
         description: entry.data.description ?? "",
         date: date ? date.toISOString().slice(0, 10) : "",
@@ -149,9 +149,10 @@ const json = JSON.stringify(terminalData).replace(/</g, "\\u003c");
 <BaseLayout
   title={config.title}
   description={intro}
+  locale={isZh ? "zh-CN" : undefined}
 >
   <div class="flex min-h-screen flex-col">
-    <Header />
+    <Header showSidebar={false} />
 
     <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-5 sm:px-6 sm:py-8">
       <section

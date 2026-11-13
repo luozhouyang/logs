@@ -4,38 +4,18 @@ import { defineCollection } from "astro:content";
 import { z } from "astro/zod";
 import { docsCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
 
-/**
- * Frontmatter fields this blog adds on top of Nimbus's docs schema. Shared by
- * both locales so a post reads the same wherever it lives.
- */
-const blogFields = {
-  // Nimbus docs are agent-friendly by default. Set `audience: human` to flag
-  // a page that's written primarily for human readers.
+// Post fields carried over from the original Astro blog. Nimbus models title,
+// description, sidebar and lastUpdated itself; these are the blog's extras.
+const schemaFields = {
   audience: z.literal("human").optional(),
-  tags: z.array(z.string()).optional(),
-  // First published, carried over from the pre-Nimbus blog (`pubDate`).
-  // Nimbus models `lastUpdated` natively; `date` is the authored date shown
-  // before it on the page.
+  /** First published date. */
   date: z.coerce.date().optional(),
-  // Content language for pages that aren't in the site locale.
-  lang: z.string().optional(),
-  // Marks a post as a translation of the same-id post in the other locale.
+  tags: z.array(z.string()).optional(),
+  /** Set on a translation: the language the post was translated from. */
   translatedFrom: z.enum(["en", "zh"]).optional(),
 };
 
 export const collections = {
-  // English — the default locale, served at the site root.
-  docs: defineCollection(
-    docsCollection({
-      schemaFields: blogFields,
-    }),
-  ),
-  // Chinese — same structure and ids as `docs`, served under /zh.
-  zh: defineCollection(
-    docsCollection({
-      base: "zh",
-      schemaFields: blogFields,
-    }),
-  ),
+  docs: defineCollection(docsCollection({ schemaFields })),
   partials: defineCollection(partialsCollection()),
 };

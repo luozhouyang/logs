@@ -1,32 +1,19 @@
-import { getCollection } from "astro:content";
-import { OGImageRoute } from "astro-og-canvas";
-import { ogCardConfig } from "./_og-card-config";
+import { getOgImagePages, getPageSection } from "@cloudflare/nimbus-docs/runtime";
+import type { APIRoute, GetStaticPaths } from "astro";
+import { renderPageCard } from "./_card";
 
-// One card per post in every locale. The key is the card's path under /og/,
-// so Chinese posts live at /og/zh/<slug>.png — matching the /zh route.
-const englishEntries = await getCollection("docs", (entry) => !entry.data.draft);
-const chineseEntries = await getCollection("zh", (entry) => !entry.data.draft);
+// Prerender every card as a static asset so `output: "server"` doesn't turn
+// image generation into an on-demand route.
+export const prerender = true;
 
-type OgPage = { title: string; description: string };
+// One card per page, written at the page's `ogImageUrl`: each key is the
+// path under /og/, `.png` included.
+export const getStaticPaths = (async () =>
+  Object.entries(await getOgImagePages()).map(([slug, page]) => ({ params: { slug }, props: { page } }))) satisfies GetStaticPaths;
 
-const pageEntries: [string, OgPage][] = [
-  ...englishEntries.map((entry): [string, OgPage] => [
-    entry.id,
-    { title: entry.data.title, description: entry.data.description ?? "" },
-  ]),
-  ...chineseEntries.map((entry): [string, OgPage] => [
-    `zh/${entry.id}`,
-    { title: entry.data.title, description: entry.data.description ?? "" },
-  ]),
-];
+type Page = Awaited<ReturnType<typeof getOgImagePages>>[string];
 
-const pages = Object.fromEntries(pageEntries);
-
-export const { getStaticPaths, GET } = await OGImageRoute({
-  pages,
-  getImageOptions: (_path, page) => ({
-    title: page.title,
-    description: page.description,
-    ...ogCardConfig,
-  }),
-});
+export const GET: APIRoute<{ page: Page }> = async ({ props: { page } }) =>
+  new Response(await renderPageCard({ section: await getPageSection(page), title: page.title }), {
+    headers: { "Content-Type": "image/png" },
+  });

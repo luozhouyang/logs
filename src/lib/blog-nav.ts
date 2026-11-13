@@ -1,12 +1,12 @@
 /**
- * Navigation data for the blog's locale-specific pages.
+ * Navigation data for the terminal homepage.
  *
- * Nimbus builds its sidebar/prev/breadcrumbs from the primary `docs` collection
- * and only prefixes URLs for docs *versions*, so pages in a second locale
- * (`zh`) derive their navigation here. Shapes match the Nimbus components, so
- * `Sidebar`, `Pagination` and `Breadcrumbs` render them unchanged.
+ * Nimbus builds its sidebar from the whole `docs` collection, so the homepage
+ * derives its own section list from the locale's entries. Shapes match the
+ * Nimbus components, so `Sidebar`/`Pagination`/`Breadcrumbs` render them
+ * unchanged.
  */
-import { categoryLabel, localePath, type Locale } from "./i18n";
+import { entryPath, localePath, type Locale } from "./i18n";
 import { getCategoryFromId, loadEntries } from "./content";
 
 export interface NavLink {
@@ -27,21 +27,6 @@ export interface NavGroup {
 }
 
 export type NavItem = NavLink | NavGroup;
-
-export interface Crumb {
-  label: string;
-  href?: string;
-}
-
-export interface PrevNextLink {
-  label: string;
-  href: string;
-}
-
-export interface PrevNextLinks {
-  prev?: PrevNextLink;
-  next?: PrevNextLink;
-}
 
 const normalize = (path: string) => path.replace(/\/+$/, "") || "/";
 
@@ -67,7 +52,7 @@ export async function buildNav(locale: Locale, currentPath: string): Promise<Nav
 
   for (const entry of entries) {
     const section = sectionOf(entry.id);
-    const href = localePath(locale, `/${entry.id}/`);
+    const href = entryPath(locale, entry.id);
     const link: NavLink = {
       type: "link",
       label: entry.data.title,
@@ -83,7 +68,7 @@ export async function buildNav(locale: Locale, currentPath: string): Promise<Nav
   const groups: NavGroup[] = [...sections.entries()].map(([slug, links]) => ({
     type: "group",
     slug,
-    label: categoryLabel(locale, slug),
+    label: slug,
     order: 0,
     children: links.sort(
       (a, b) => a.order - b.order || a.label.localeCompare(b.label, locale),
@@ -99,26 +84,15 @@ export function flattenNav(items: NavItem[]): NavLink[] {
 }
 
 /** Prev/next for the current page within its locale's nav order. */
-export function findPrevNext(items: NavItem[], currentPath: string): PrevNextLinks {
+export function findPrevNext(items: NavItem[], currentPath: string) {
   const links = flattenNav(items);
   const index = links.findIndex((link) => normalize(link.href) === normalize(currentPath));
   if (index === -1) return {};
 
-  const toLink = (link: NavLink | undefined): PrevNextLink | undefined =>
+  const toLink = (link: NavLink | undefined) =>
     link ? { label: link.label, href: link.href } : undefined;
 
   return { prev: toLink(links[index - 1]), next: toLink(links[index + 1]) };
-}
-
-/** Sections plus where they lead, for the landing page's cards. */
-export function navCards(items: NavItem[]) {
-  return items
-    .filter((item): item is NavGroup => item.type === "group")
-    .map((group) => ({
-      label: group.label,
-      href: group.children[0]?.href ?? "/",
-      count: group.children.length,
-    }));
 }
 
 /** Home / section / page trail for a post. */
@@ -126,13 +100,11 @@ export function buildBreadcrumbs(
   locale: Locale,
   entry: { id: string; data: { title: string } },
   homeLabel: string,
-): Crumb[] {
+) {
   const section = sectionOf(entry.id);
   return [
     { label: homeLabel, href: localePath(locale, "/") },
-    {
-      label: categoryLabel(locale, section),
-    },
+    { label: section },
     { label: entry.data.title },
   ];
 }

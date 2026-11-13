@@ -1,9 +1,4 @@
-/**
- * English feed — the default locale.
- *
- * The pre-Nimbus blog shipped /rss.xml, so the path stays; Chinese posts have
- * their own feed at /zh/rss.xml.
- */
+/** English feed — the default locale. */
 import { buildFeed } from "../lib/feed";
 
 export const prerender = true;

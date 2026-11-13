@@ -1,4 +1,4 @@
-/** Chinese feed, mirroring /rss.xml for the /zh locale. */
+/** Chinese feed, mirroring /rss.xml. */
 import { buildFeed } from "../../lib/feed";
 
 export const prerender = true;
