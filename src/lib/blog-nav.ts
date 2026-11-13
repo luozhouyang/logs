@@ -20,6 +20,8 @@ export interface NavLink {
 
 export interface NavGroup {
   type: "group";
+  /** Content folder this group represents (e.g. "kong"). */
+  slug: string;
   label: string;
   order: number;
   children: NavLink[];
@@ -81,6 +83,7 @@ export async function buildNav(locale: Locale, currentPath: string): Promise<Nav
 
   const groups: NavGroup[] = [...sections.entries()].map(([slug, links]) => ({
     type: "group",
+    slug,
     label: categoryLabel(locale, slug),
     order: 0,
     children: links.sort(

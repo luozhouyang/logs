@@ -32,9 +32,17 @@ The site itself is the stock Nimbus structure: `src/pages/index.astro` landing,
 `DocsLayout` for posts, the starter `Header` (section tabs, search, theme
 toggle), and `Render`/partials support — only the locale plumbing is added.
 
-The homepage (`src/components/HomePage.astro`) is the one custom surface: a
-terminal-style index built from the content itself — topic counts, the full
-post log, feeds and agent links. Everything else is the Nimbus starter.
+The homepage (`src/components/HomePage.astro` + `src/scripts/terminal.ts`) is
+the one custom surface: an interactive terminal. It plays a scripted tour that
+types a command, prints the result and moves on, walking every section and post
+(`ls`, `ls <section>`, `cat <post>`, …). Typing or clicking hands control to the
+reader; once their command has printed and they have been idle for 10s
+(`data-idle-ms`), the tour resumes where it left off.
+
+Commands: `ls [section]`, `cat <post>`, `open <post>`, `find <kw>`, `whoami`,
+`about`, `rss`, `llms`, `github`, `lang`, `date`, `pwd`, `echo`, `clear`, `help`.
+Copy and content are baked in at build time; a screen-reader/crawler mirror of
+every post lives in an `sr-only` nav. Everything else is the Nimbus starter.
 
 ```mdx
 ---

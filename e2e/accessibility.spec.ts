@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 test.describe("Accessibility", () => {
   test("homepage has no critical a11y violations", async ({ page }) => {
@@ -64,14 +64,30 @@ test.describe("Accessibility", () => {
 });
 
 test.describe("Visual screenshots", () => {
+  /**
+   * The homepage terminal auto-plays, so a naive screenshot races the animation.
+   * Take over, clear the scrollback and print one fixed command instead — the
+   * result is the same layout with deterministic content.
+   */
+  async function settleTerminal(page: Page) {
+    const input = page.locator("[data-term-input]");
+    await input.click();
+    await input.press("Control+l");
+    await input.fill("help");
+    await input.press("Enter");
+    await expect(page.locator("[data-term-output]")).toContainText("cat <post>");
+    await expect(page.locator("[data-term-status]")).toHaveText(/manual/i);
+  }
+
   test("homepage light mode", async ({ page }) => {
     await page.goto("/");
     await page.evaluate(() => localStorage.setItem("ui-mode", "light"));
     await page.reload();
     await page.waitForLoadState("networkidle");
+    await settleTerminal(page);
     await expect(page).toHaveScreenshot("homepage-light.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.05,
+      maxDiffPixelRatio: 0.02,
     });
   });
 
@@ -80,9 +96,10 @@ test.describe("Visual screenshots", () => {
     await page.evaluate(() => localStorage.setItem("ui-mode", "dark"));
     await page.reload();
     await page.waitForLoadState("networkidle");
+    await settleTerminal(page);
     await expect(page).toHaveScreenshot("homepage-dark.png", {
       fullPage: true,
-      maxDiffPixelRatio: 0.05,
+      maxDiffPixelRatio: 0.02,
     });
   });
 

@@ -48,17 +48,25 @@ test.describe("Locales", () => {
     await expect(page.locator("[data-lang-switch='zh']")).toHaveAttribute("href", "/zh/");
   });
 
-  test("Chinese landing lists only Chinese sections and posts", async ({ page }) => {
+  test("Chinese terminal runs against the Chinese corpus", async ({ page }) => {
     await page.goto("/zh/");
-    const topics = page.locator('section[aria-labelledby="topics-heading"]');
-    await expect(topics.locator("a")).toHaveCount(2);
-    await expect(topics.locator('a[href="/zh/kong/introduction/"]')).toContainText("Kong");
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+    // Banner and chrome are Chinese…
+    await expect(page.locator("[data-term-output]")).toContainText("交互式终端");
 
-    // The English-only e-commerce series has no Chinese counterpart.
-    await expect(page.locator("main")).not.toContainText("E Commerce");
-    await expect(
-      page.locator('section[aria-labelledby="latest-heading"] li'),
-    ).toHaveCount(4);
+    // …and commands only reach Chinese posts: the e-commerce series has no
+    // Chinese counterpart, so `ls` lists two sections and `ls kong` two posts.
+    const input = page.locator("[data-term-input]");
+    await input.click();
+    await input.fill("ls");
+    await input.press("Enter");
+    const output = page.locator("[data-term-output]");
+    await expect(output).toContainText("cloudflare/");
+    await expect(output).not.toContainText("e-commerce/");
+
+    await input.fill("ls kong");
+    await input.press("Enter");
+    await expect(output).toContainText("在Docker部署Kong Gateway");
   });
 
   test("Chinese markdown alternate is available for agents", async ({ request }) => {

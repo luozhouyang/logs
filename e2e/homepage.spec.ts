@@ -1,53 +1,75 @@
 import { test, expect } from "@playwright/test";
 
-test.describe("Homepage", () => {
-  test("renders the hero title and description", async ({ page }) => {
+// The landing page is a single interactive terminal: it plays a scripted tour
+// of every section and post, hands control over as soon as you type, and picks
+// the tour back up after `data-idle-ms` of inactivity (10s by default).
+test.describe("Homepage terminal", () => {
+  test("shows a single terminal with the site heading", async ({ page }) => {
     await page.goto("/");
+    await expect(page.locator("[data-terminal]")).toBeVisible();
     await expect(page.locator("h1")).toContainText("luozhouyang");
-    await expect(page.locator("main p").first()).toBeVisible();
+    await expect(page.locator("[data-term-input]")).toBeVisible();
+    await expect(page.locator("[data-term-status]")).toHaveText(/auto/i);
   });
 
-  test("lists every post in the log", async ({ page }) => {
+  test("auto-plays the tour and lists the sections", async ({ page }) => {
     await page.goto("/");
-    const log = page.locator('section[aria-labelledby="latest-heading"] li');
-    await expect(log).toHaveCount(14);
-    await expect(log.first()).toContainText("Database Design");
+    const output = page.locator("[data-term-output]");
+    await expect(output).toContainText("$ whoami");
+    await expect(output).toContainText("$ ls");
+    await expect(output).toContainText("cloudflare/");
+    await expect(output).toContainText("kong/");
   });
 
-  test("displays topic rows with correct links", async ({ page }) => {
+  test("typing takes over and commands run", async ({ page }) => {
     await page.goto("/");
-    const topics = page.locator('section[aria-labelledby="topics-heading"]');
-    await expect(topics.locator("a")).toHaveCount(3);
-    await expect(topics.locator('a[href="/kong/introduction/"]')).toContainText("Kong");
-    await expect(
-      topics.locator('a[href="/cloudflare/r2-image-hosting/"]'),
-    ).toContainText("Cloudflare");
+    const input = page.locator("[data-term-input]");
+
+    await input.click();
+    await expect(page.locator("[data-term-status]")).toHaveText(/manual/i);
+
+    await input.fill("ls kong");
+    await input.press("Enter");
+    await expect(page.locator("[data-term-output]")).toContainText(
+      "Kong Gateway introduction",
+    );
+
+    await input.fill("cat kong/introduction");
+    await input.press("Enter");
+    await expect(page.locator("[data-term-output]")).toContainText(
+      "Kong Gateway is one of the most widely used API Gateways",
+    );
   });
 
-  test("topic rows navigate to a post", async ({ page }) => {
+  test("unknown commands fail loudly", async ({ page }) => {
     await page.goto("/");
-    await page.locator('section[aria-labelledby="topics-heading"] a[href="/kong/introduction/"]').click();
-    await expect(page).toHaveURL(/\/kong\/introduction\/?$/);
-    await expect(page.locator("h1")).toContainText("Kong Gateway introduction");
+    const input = page.locator("[data-term-input]");
+    await input.click();
+    await input.fill("sudo rm -rf /");
+    await input.press("Enter");
+    await expect(page.locator("[data-term-output]")).toContainText("command not found");
   });
 
-  test("header shows site title and links back home", async ({ page }) => {
+  test("the tour resumes after the idle delay", async ({ page }) => {
     await page.goto("/");
-    const headerLink = page.locator("header a[href='/']");
-    await expect(headerLink).toBeVisible();
-    await expect(headerLink).toContainText("luozhouyang's log");
+    // Shorten the 10s default just for this test.
+    await page
+      .locator("[data-terminal]")
+      .evaluate((element) => element.setAttribute("data-idle-ms", "1200"));
+
+    const input = page.locator("[data-term-input]");
+    await input.click();
+    await input.fill("help");
+    await input.press("Enter");
+    await expect(page.locator("[data-term-status]")).toHaveText(/manual/i);
+
+    await expect(page.locator("[data-term-status]")).toHaveText(/auto/i, { timeout: 5000 });
+    await expect(page.locator("[data-term-output]")).toContainText("resuming the tour");
   });
 
-  test("header has theme toggle and search", async ({ page }) => {
+  test("keeps a crawlable list of every post", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("[data-nb-theme-toggle]")).toBeVisible();
-    await expect(page.locator("[data-search-trigger]")).toBeVisible();
-  });
-
-  test("header has GitHub link", async ({ page }) => {
-    await page.goto("/");
-    const ghLink = page.locator("header a[aria-label='GitHub']");
-    await expect(ghLink).toBeVisible();
-    await expect(ghLink).toHaveAttribute("href", "https://github.com/luozhouyang");
+    const mirror = page.locator("nav[aria-label='All posts']");
+    await expect(mirror.locator("a")).toHaveCount(14);
   });
 });

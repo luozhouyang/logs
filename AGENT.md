@@ -14,9 +14,12 @@ site. The original posts were migrated from an Astro blog, so:
   separate categories/tags layer; post pages use the starter's layout and
   components as-is.
 - **The homepage is the one bespoke surface.** `src/components/HomePage.astro`
-  renders a terminal-style index (hero prompt, topic rows, `cat latest.log`
-  list) for both locales from real content — keep the copy in its `t` object,
-  one branch per locale, so the two homepages cannot drift.
+  renders an interactive terminal; `src/scripts/terminal.ts` holds the client
+  logic (command parser, scripted tour, takeover, idle resume). Content and
+  copy are built from the locale's entries — keep the `zh`/`en` copy branches
+  aligned, and keep the `sr-only` nav mirror (SEO and screen readers) when
+  touching the layout. `data-idle-ms` on the terminal root tunes the resume
+  delay (default 10s); tests shorten it.
 - **Translations share the entry id.** A translation is the same
   `<section>/<slug>` in the other collection — that pairing drives the language
   switcher (`src/lib/blog-nav.ts`) and the `hreflang` alternates. Mark
